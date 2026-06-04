@@ -1,11 +1,51 @@
 import Phaser from "phaser";
+import { Client, type Room } from "colyseus.js";
+import { WORLD, PLAYER, MACHINEGUN, clamp, type ShotMessage } from "@vertix/shared";
 
-const WORLD_WIDTH = 2000;
-const WORLD_HEIGHT = 2000;
-const PLAYER_SIZE = 28;
-const PLAYER_SPEED = 320; // px/s (arcade velocity is already time-based)
-const AIM_LINE_LENGTH = 220; // px, length of the aim guide line
-const RETICLE_RADIUS = 6; // px, crosshair circle at the cursor
+const PLAYER_SIZE = PLAYER.RADIUS * 2;
+const AIM_LINE_LENGTH = 220;
+const RETICLE_RADIUS = 6;
+const INTERP = 0.25; // interpolation factor for remote players
+const RECONCILE_THRESHOLD = 48; // px drift before snapping local prediction
+const TRACER_MS = 70;
+const SERVER_URL = process.env.NEXT_PUBLIC_GAME_SERVER_URL ?? "ws://localhost:2567";
+
+/** Shape of the replicated Player schema as seen on the client. */
+interface PlayerState {
+  x: number;
+  y: number;
+  angle: number;
+  hp: number;
+  maxHp: number;
+  ammo: number;
+  reloading: boolean;
+  alive: boolean;
+  kills: number;
+  deaths: number;
+}
+
+interface StatePlayers {
+  forEach(callback: (player: PlayerState, key: string) => void): void;
+  get(key: string): PlayerState | undefined;
+}
+
+interface PlayerView {
+  rect: Phaser.GameObjects.Rectangle;
+  muzzle: Phaser.GameObjects.Rectangle;
+  targetX: number;
+  targetY: number;
+  angle: number;
+  alive: boolean;
+}
+
+interface Tracer {
+  sx: number;
+  sy: number;
+  ex: number;
+  ey: number;
+  hit: boolean;
+  until: number;
+}
 
 type WASDKeys = {
   W: Phaser.Input.Keyboard.Key;
@@ -15,34 +55,43 @@ type WASDKeys = {
 };
 
 /**
- * ArenaScene — top-down arena with a single locally-controlled player.
+ * ArenaScene — top-down TPS client for the authoritative Colyseus server.
  *
- * Scope: top-view camera that follows the player, WASD movement, mouse aim
- * (player rotates toward the cursor) and an aim guide line + reticle. No
- * networking, weapons or wall collision yet (those arrive in later milestones).
+ * The scene sends only input; the server owns movement, firing, hit detection
+ * and health. Remote players are interpolated toward their server positions;
+ * the local player is predicted for responsiveness and snapped back if it
+ * drifts too far from the authoritative position.
  */
 export class ArenaScene extends Phaser.Scene {
-  private player!: Phaser.GameObjects.Rectangle;
-  private playerBody!: Phaser.Physics.Arcade.Body;
-  private muzzle!: Phaser.GameObjects.Rectangle;
-  private aimGraphics!: Phaser.GameObjects.Graphics;
+  private client?: Client;
+  private room?: Room;
+  private mySessionId = "";
+
+  private readonly views = new Map<string, PlayerView>();
+  private readonly predicted = new Phaser.Math.Vector2();
+  private readonly aimWorld = new Phaser.Math.Vector2();
+  private localAim = 0;
+  private seq = 0;
+  private tracers: Tracer[] = [];
+
   private keys!: WASDKeys;
+  private keyR!: Phaser.Input.Keyboard.Key;
+  private aimGraphics!: Phaser.GameObjects.Graphics;
+  private tracerGraphics!: Phaser.GameObjects.Graphics;
+  private hudText!: Phaser.GameObjects.Text;
 
   constructor() {
     super("arena");
   }
 
   create(): void {
-    // World + physics bounds (top-down plane).
-    this.physics.world.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
-
-    // Floor grid so the camera movement is visible.
+    // Floor grid + world border (top-down).
     this.add
       .grid(
-        WORLD_WIDTH / 2,
-        WORLD_HEIGHT / 2,
-        WORLD_WIDTH,
-        WORLD_HEIGHT,
+        WORLD.WIDTH / 2,
+        WORLD.HEIGHT / 2,
+        WORLD.WIDTH,
+        WORLD.HEIGHT,
         64,
         64,
         0x121826,
@@ -51,96 +100,235 @@ export class ArenaScene extends Phaser.Scene {
         1,
       )
       .setDepth(-1);
-
-    // World border.
     this.add
-      .rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, WORLD_WIDTH, WORLD_HEIGHT)
+      .rectangle(WORLD.WIDTH / 2, WORLD.HEIGHT / 2, WORLD.WIDTH, WORLD.HEIGHT)
       .setStrokeStyle(2, 0x4ea1ff, 0.5);
 
-    // Aim guide line + reticle, redrawn every frame.
+    this.tracerGraphics = this.add.graphics().setDepth(1);
     this.aimGraphics = this.add.graphics().setDepth(1);
 
-    // Player: a rectangle driven by an arcade physics body.
-    this.player = this.add
-      .rectangle(WORLD_WIDTH / 2, WORLD_HEIGHT / 2, PLAYER_SIZE, PLAYER_SIZE, 0x4ea1ff)
-      .setDepth(2);
-    this.physics.add.existing(this.player);
-    this.playerBody = this.player.body as Phaser.Physics.Arcade.Body;
-    this.playerBody.setCollideWorldBounds(true);
-
-    // Muzzle marker showing the facing direction; positioned each frame.
-    this.muzzle = this.add
-      .rectangle(this.player.x, this.player.y, 14, 6, 0xffd166)
-      .setDepth(3);
-
-    // Top-view camera follows the player.
     const camera = this.cameras.main;
-    camera.setBounds(0, 0, WORLD_WIDTH, WORLD_HEIGHT);
+    camera.setBounds(0, 0, WORLD.WIDTH, WORLD.HEIGHT);
     camera.setBackgroundColor("#0b0e14");
-    camera.startFollow(this.player, true, 0.15, 0.15);
+    camera.centerOn(WORLD.WIDTH / 2, WORLD.HEIGHT / 2);
 
-    // WASD input.
     this.keys = this.input.keyboard!.addKeys("W,A,S,D") as WASDKeys;
+    this.keyR = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.R);
 
-    // Fixed on-screen hint (does not scroll with the world).
-    this.add
-      .text(12, 12, "WASD to move · mouse to aim", {
+    this.hudText = this.add
+      .text(12, 12, "Connecting…", {
         fontFamily: "monospace",
-        fontSize: "16px",
+        fontSize: "15px",
         color: "#9fb3c8",
       })
       .setScrollFactor(0)
       .setDepth(10);
+
+    // Leave the room cleanly when the scene/game is torn down.
+    const leave = () => {
+      void this.room?.leave();
+    };
+    this.events.once(Phaser.Scenes.Events.SHUTDOWN, leave);
+    this.events.once(Phaser.Scenes.Events.DESTROY, leave);
+
+    void this.connect();
   }
 
-  update(): void {
-    this.updateMovement();
-    this.updateAim();
+  private async connect(): Promise<void> {
+    this.client = new Client(SERVER_URL);
+    try {
+      this.room = await this.client.joinOrCreate("arena");
+    } catch (err) {
+      console.error("[ArenaScene] failed to join room", err);
+      this.hudText.setText(
+        `Failed to connect to ${SERVER_URL}\nStart the game server: pnpm dev:server`,
+      );
+      return;
+    }
+
+    this.mySessionId = this.room.sessionId;
+    this.room.onMessage("shot", (msg: ShotMessage) => {
+      this.tracers.push({
+        sx: msg.sx,
+        sy: msg.sy,
+        ex: msg.ex,
+        ey: msg.ey,
+        hit: msg.hit,
+        until: this.time.now + TRACER_MS,
+      });
+    });
+    this.room.onLeave(() => this.hudText.setText("Disconnected from server"));
   }
 
-  private updateMovement(): void {
-    const direction = new Phaser.Math.Vector2(0, 0);
-    if (this.keys.A.isDown) direction.x -= 1;
-    if (this.keys.D.isDown) direction.x += 1;
-    if (this.keys.W.isDown) direction.y -= 1;
-    if (this.keys.S.isDown) direction.y += 1;
+  update(_time: number, deltaMs: number): void {
+    this.drawTracers();
+    if (!this.room) return;
 
-    // Normalize so diagonal movement is not faster, then apply speed.
-    direction.normalize().scale(PLAYER_SPEED);
-    this.playerBody.setVelocity(direction.x, direction.y);
+    const players = (this.room.state as { players: StatePlayers }).players;
+    this.syncViews(players);
+
+    const me = players.get(this.mySessionId);
+    if (me) this.handleLocalInput(me, deltaMs);
+    this.renderViews();
+    if (me) this.drawAim();
+    this.updateHud(me);
   }
 
-  private updateAim(): void {
-    // Convert the cursor (screen space) to world space under the following camera.
+  private syncViews(players: StatePlayers): void {
+    const seen = new Set<string>();
+
+    players.forEach((p, id) => {
+      seen.add(id);
+      let view = this.views.get(id);
+      if (!view) {
+        view = this.createView(id);
+        this.views.set(id, view);
+        view.rect.setPosition(p.x, p.y);
+        if (id === this.mySessionId) {
+          this.predicted.set(p.x, p.y);
+          this.cameras.main.startFollow(view.rect, true, 0.18, 0.18);
+        }
+      }
+      view.targetX = p.x;
+      view.targetY = p.y;
+      view.angle = p.angle;
+      view.alive = p.alive;
+    });
+
+    this.views.forEach((view, id) => {
+      if (!seen.has(id)) {
+        view.rect.destroy();
+        view.muzzle.destroy();
+        this.views.delete(id);
+      }
+    });
+  }
+
+  private createView(id: string): PlayerView {
+    const isLocal = id === this.mySessionId;
+    const rect = this.add
+      .rectangle(0, 0, PLAYER_SIZE, PLAYER_SIZE, isLocal ? 0x4ea1ff : 0xff7a59)
+      .setDepth(2);
+    const muzzle = this.add.rectangle(0, 0, 14, 6, 0xffd166).setDepth(3);
+    return { rect, muzzle, targetX: 0, targetY: 0, angle: 0, alive: true };
+  }
+
+  private handleLocalInput(me: PlayerState, deltaMs: number): void {
+    const dt = deltaMs / 1000;
+
+    let mx = 0;
+    let my = 0;
+    if (this.keys.A.isDown) mx -= 1;
+    if (this.keys.D.isDown) mx += 1;
+    if (this.keys.W.isDown) my -= 1;
+    if (this.keys.S.isDown) my += 1;
+    const len = Math.hypot(mx, my);
+    if (len > 0) {
+      mx /= len;
+      my /= len;
+    }
+
     const pointer = this.input.activePointer;
     const world = this.cameras.main.getWorldPoint(pointer.x, pointer.y);
-
-    const angle = Phaser.Math.Angle.Between(
-      this.player.x,
-      this.player.y,
+    this.aimWorld.set(world.x, world.y);
+    this.localAim = Phaser.Math.Angle.Between(
+      this.predicted.x,
+      this.predicted.y,
       world.x,
       world.y,
     );
 
-    // Rotate the character toward the cursor.
-    this.player.setRotation(angle);
+    const firing = pointer.leftButtonDown();
+    this.seq += 1;
+    this.room!.send("input", {
+      seq: this.seq,
+      moveX: mx,
+      moveY: my,
+      aim: this.localAim,
+      firing,
+    });
+    if (Phaser.Input.Keyboard.JustDown(this.keyR)) this.room!.send("reload");
 
-    // Keep the muzzle marker at the front of the player, facing the cursor.
-    const muzzleDistance = PLAYER_SIZE / 2 + 4;
-    this.muzzle.setPosition(
-      this.player.x + Math.cos(angle) * muzzleDistance,
-      this.player.y + Math.sin(angle) * muzzleDistance,
+    // Local prediction (server remains authoritative).
+    if (me.alive) {
+      const distance = PLAYER.SPEED * dt;
+      this.predicted.x = clamp(
+        this.predicted.x + mx * distance,
+        PLAYER.RADIUS,
+        WORLD.WIDTH - PLAYER.RADIUS,
+      );
+      this.predicted.y = clamp(
+        this.predicted.y + my * distance,
+        PLAYER.RADIUS,
+        WORLD.HEIGHT - PLAYER.RADIUS,
+      );
+    }
+    if (
+      Phaser.Math.Distance.Between(this.predicted.x, this.predicted.y, me.x, me.y) >
+      RECONCILE_THRESHOLD
+    ) {
+      this.predicted.set(me.x, me.y);
+    }
+  }
+
+  private renderViews(): void {
+    this.views.forEach((view, id) => {
+      if (id === this.mySessionId) {
+        view.rect.setPosition(this.predicted.x, this.predicted.y);
+        view.rect.setRotation(this.localAim);
+        this.positionMuzzle(view, this.localAim);
+      } else {
+        view.rect.x = Phaser.Math.Linear(view.rect.x, view.targetX, INTERP);
+        view.rect.y = Phaser.Math.Linear(view.rect.y, view.targetY, INTERP);
+        view.rect.setRotation(view.angle);
+        this.positionMuzzle(view, view.angle);
+      }
+      view.rect.setAlpha(view.alive ? 1 : 0.25);
+      view.muzzle.setVisible(view.alive);
+    });
+  }
+
+  private positionMuzzle(view: PlayerView, angle: number): void {
+    const d = PLAYER.RADIUS + 4;
+    view.muzzle.setPosition(
+      view.rect.x + Math.cos(angle) * d,
+      view.rect.y + Math.sin(angle) * d,
     );
-    this.muzzle.setRotation(angle);
+    view.muzzle.setRotation(angle);
+  }
 
-    // Draw the aim guide line from the player toward the cursor + a reticle.
-    const aimEndX = this.player.x + Math.cos(angle) * AIM_LINE_LENGTH;
-    const aimEndY = this.player.y + Math.sin(angle) * AIM_LINE_LENGTH;
+  private drawAim(): void {
+    const endX = this.predicted.x + Math.cos(this.localAim) * AIM_LINE_LENGTH;
+    const endY = this.predicted.y + Math.sin(this.localAim) * AIM_LINE_LENGTH;
 
     this.aimGraphics.clear();
     this.aimGraphics.lineStyle(2, 0x4ea1ff, 0.6);
-    this.aimGraphics.lineBetween(this.player.x, this.player.y, aimEndX, aimEndY);
+    this.aimGraphics.lineBetween(this.predicted.x, this.predicted.y, endX, endY);
     this.aimGraphics.lineStyle(1.5, 0xffffff, 0.85);
-    this.aimGraphics.strokeCircle(world.x, world.y, RETICLE_RADIUS);
+    this.aimGraphics.strokeCircle(this.aimWorld.x, this.aimWorld.y, RETICLE_RADIUS);
+  }
+
+  private drawTracers(): void {
+    const now = this.time.now;
+    this.tracers = this.tracers.filter((t) => t.until > now);
+    this.tracerGraphics.clear();
+    for (const t of this.tracers) {
+      this.tracerGraphics.lineStyle(2, t.hit ? 0xff5555 : 0xffe08a, 0.9);
+      this.tracerGraphics.lineBetween(t.sx, t.sy, t.ex, t.ey);
+    }
+  }
+
+  private updateHud(me: PlayerState | undefined): void {
+    if (!me) {
+      this.hudText.setText("Connecting…");
+      return;
+    }
+    const ammo = me.reloading ? "RELOADING" : `${me.ammo}/${MACHINEGUN.magSize}`;
+    const dead = me.alive ? "" : "   ☠ respawning…";
+    this.hudText.setText(
+      `Triggerman   HP ${Math.max(0, Math.round(me.hp))}/${me.maxHp}   ` +
+        `Ammo ${ammo}   Kills ${me.kills}${dead}\n` +
+        "WASD move · mouse aim · hold click to fire · R reload",
+    );
   }
 }
