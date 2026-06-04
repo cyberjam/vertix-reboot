@@ -7,10 +7,8 @@ const GAME_WIDTH = 960;
 const GAME_HEIGHT = 540;
 
 /**
- * Mounts a minimal Phaser 3 game with a single "boot" scene.
- *
- * Milestone 1: proves Phaser renders inside Next.js (client-only). There is
- * no gameplay, input, networking or map yet — those arrive in M3+.
+ * Mounts the Phaser 3 game (client-only) and runs the ArenaScene:
+ * top-view camera, a locally-controlled player, and WASD movement.
  */
 export default function PhaserGame() {
   const containerRef = useRef<HTMLDivElement | null>(null);
@@ -20,27 +18,10 @@ export default function PhaserGame() {
     let cancelled = false;
 
     void (async () => {
-      // Import Phaser lazily so it only loads in the browser.
+      // Load Phaser and the scene lazily so they only run in the browser.
       const Phaser = (await import("phaser")).default;
+      const { ArenaScene } = await import("./scenes/ArenaScene");
       if (cancelled || !containerRef.current || gameRef.current) return;
-
-      class BootScene extends Phaser.Scene {
-        constructor() {
-          super("boot");
-        }
-
-        create(): void {
-          const { width, height } = this.scale;
-          this.add
-            .text(width / 2, height / 2, "Vertix Reboot\nPhaser boot OK", {
-              fontFamily: "monospace",
-              fontSize: "24px",
-              color: "#4ea1ff",
-              align: "center",
-            })
-            .setOrigin(0.5);
-        }
-      }
 
       gameRef.current = new Phaser.Game({
         type: Phaser.AUTO,
@@ -48,7 +29,11 @@ export default function PhaserGame() {
         height: GAME_HEIGHT,
         parent: containerRef.current,
         backgroundColor: "#0b0e14",
-        scene: [BootScene],
+        physics: {
+          default: "arcade",
+          arcade: { debug: false },
+        },
+        scene: [ArenaScene],
       });
     })();
 
