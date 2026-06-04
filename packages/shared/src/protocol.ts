@@ -29,3 +29,15 @@ export type ShotMessage = {
   /** Whether the shot hit a player. */
   hit: boolean;
 };
+
+/** Server -> all clients: a kill happened (message type "kill"). For the kill feed. */
+export type KillMessage = {
+  killerName: string;
+  victimName: string;
+};
+
+/** Options a client may pass when joining a room. */
+export type JoinOptions = {
+  /** Display name shown on the scoreboard / above the player. */
+  name?: string;
+};

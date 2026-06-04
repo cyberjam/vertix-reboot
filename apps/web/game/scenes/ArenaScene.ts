@@ -7,6 +7,7 @@ import {
   stepMovement,
   type InputMessage,
   type ShotMessage,
+  type KillMessage,
 } from "@vertix/shared";
 
 const PLAYER_SIZE = PLAYER.RADIUS * 2;
@@ -14,10 +15,12 @@ const AIM_LINE_LENGTH = 220;
 const RETICLE_RADIUS = 6;
 const INTERP = 0.25; // interpolation factor for remote players
 const TRACER_MS = 70;
+const KILLFEED_MS = 4000;
+const SCOREBOARD_ROWS = 8;
 const SERVER_URL = process.env.NEXT_PUBLIC_GAME_SERVER_URL ?? "ws://localhost:2567";
 
-/** Shape of the replicated Player schema as seen on the client. */
 interface PlayerState {
+  name: string;
   x: number;
   y: number;
   angle: number;
@@ -28,7 +31,17 @@ interface PlayerState {
   alive: boolean;
   kills: number;
   deaths: number;
+  score: number;
   lastSeq: number;
+}
+
+interface MatchStateView {
+  mode: string;
+  phase: string;
+  timeRemainingMs: number;
+  targetScore: number;
+  winnerId: string;
+  winnerName: string;
 }
 
 interface StatePlayers {
@@ -39,6 +52,7 @@ interface StatePlayers {
 interface PlayerView {
   rect: Phaser.GameObjects.Rectangle;
   muzzle: Phaser.GameObjects.Rectangle;
+  label: Phaser.GameObjects.Text;
   targetX: number;
   targetY: number;
   angle: number;
@@ -54,6 +68,12 @@ interface Tracer {
   until: number;
 }
 
+interface KillFeedEntry {
+  killer: string;
+  victim: string;
+  until: number;
+}
+
 type WASDKeys = {
   W: Phaser.Input.Keyboard.Key;
   A: Phaser.Input.Keyboard.Key;
@@ -62,13 +82,12 @@ type WASDKeys = {
 };
 
 /**
- * ArenaScene — top-down TPS client for the authoritative Colyseus server.
+ * ArenaScene — top-down TPS client for the authoritative Colyseus FFA server.
  *
- * The client sends only input; the server owns movement, firing, hit detection
- * and health. The local player is predicted immediately and reconciled every
- * frame by replaying inputs the server has not yet acknowledged on top of the
- * authoritative position. Remote players are interpolated toward their server
- * positions.
+ * Sends only input; the server owns movement, firing, hit detection, health,
+ * scoring and the round loop. The local player is predicted and reconciled
+ * against the authoritative position; remote players are interpolated. Renders
+ * the HUD, scoreboard, kill feed and round-result banner.
  */
 export class ArenaScene extends Phaser.Scene {
   private client?: Client;
@@ -82,19 +101,23 @@ export class ArenaScene extends Phaser.Scene {
   private localAim = 0;
   private seq = 0;
   private tracers: Tracer[] = [];
+  private killFeed: KillFeedEntry[] = [];
 
   private keys!: WASDKeys;
   private keyR!: Phaser.Input.Keyboard.Key;
   private aimGraphics!: Phaser.GameObjects.Graphics;
   private tracerGraphics!: Phaser.GameObjects.Graphics;
   private hudText!: Phaser.GameObjects.Text;
+  private matchText!: Phaser.GameObjects.Text;
+  private scoreboardText!: Phaser.GameObjects.Text;
+  private killFeedText!: Phaser.GameObjects.Text;
+  private bannerText!: Phaser.GameObjects.Text;
 
   constructor() {
     super("arena");
   }
 
   create(): void {
-    // Floor grid + world border (top-down).
     this.add
       .grid(
         WORLD.WIDTH / 2,
@@ -124,16 +147,8 @@ export class ArenaScene extends Phaser.Scene {
     this.keys = this.input.keyboard!.addKeys("W,A,S,D") as WASDKeys;
     this.keyR = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.R);
 
-    this.hudText = this.add
-      .text(12, 12, "Connecting…", {
-        fontFamily: "monospace",
-        fontSize: "15px",
-        color: "#9fb3c8",
-      })
-      .setScrollFactor(0)
-      .setDepth(10);
+    this.buildHud();
 
-    // Leave the room cleanly when the scene/game is torn down.
     const leave = () => {
       void this.room?.leave();
     };
@@ -143,10 +158,52 @@ export class ArenaScene extends Phaser.Scene {
     void this.connect();
   }
 
+  private buildHud(): void {
+    const width = this.scale.width;
+    const height = this.scale.height;
+    const mono = (size: number) => ({
+      fontFamily: "monospace",
+      fontSize: `${size}px`,
+      color: "#9fb3c8",
+    });
+
+    this.hudText = this.add.text(12, 12, "Connecting…", mono(15)).setScrollFactor(0).setDepth(10);
+
+    this.matchText = this.add
+      .text(width / 2, 12, "", { ...mono(15), color: "#e6e6e6", align: "center" })
+      .setOrigin(0.5, 0)
+      .setScrollFactor(0)
+      .setDepth(10);
+
+    this.scoreboardText = this.add
+      .text(width - 12, 12, "", { ...mono(13), color: "#cdd9e5", align: "left" })
+      .setOrigin(1, 0)
+      .setScrollFactor(0)
+      .setDepth(10);
+
+    this.killFeedText = this.add
+      .text(12, 64, "", { ...mono(13), color: "#ffd166", align: "left" })
+      .setScrollFactor(0)
+      .setDepth(10);
+
+    this.bannerText = this.add
+      .text(width / 2, height / 2, "", {
+        fontFamily: "monospace",
+        fontSize: "28px",
+        color: "#ffd166",
+        align: "center",
+      })
+      .setOrigin(0.5)
+      .setScrollFactor(0)
+      .setDepth(11)
+      .setVisible(false);
+  }
+
   private async connect(): Promise<void> {
     this.client = new Client(SERVER_URL);
+    const name = `Guest${Math.floor(1000 + Math.random() * 9000)}`;
     try {
-      this.room = await this.client.joinOrCreate("arena");
+      this.room = await this.client.joinOrCreate("arena", { name });
     } catch (err) {
       console.error("[ArenaScene] failed to join room", err);
       this.hudText.setText(
@@ -166,21 +223,32 @@ export class ArenaScene extends Phaser.Scene {
         until: this.time.now + TRACER_MS,
       });
     });
+    this.room.onMessage("kill", (msg: KillMessage) => {
+      this.killFeed.push({
+        killer: msg.killerName,
+        victim: msg.victimName,
+        until: this.time.now + KILLFEED_MS,
+      });
+      if (this.killFeed.length > 6) this.killFeed.shift();
+    });
     this.room.onLeave(() => this.hudText.setText("Disconnected from server"));
   }
 
   update(_time: number, deltaMs: number): void {
     this.drawTracers();
+    this.drawKillFeed();
     if (!this.room) return;
 
-    const players = (this.room.state as { players: StatePlayers }).players;
-    this.syncViews(players);
+    const state = this.room.state as { players: StatePlayers; match: MatchStateView };
+    this.syncViews(state.players);
 
-    const me = players.get(this.mySessionId);
+    const me = state.players.get(this.mySessionId);
     if (me) this.handleLocalInput(me, deltaMs);
     this.renderViews();
     if (me) this.drawAim();
     this.updateHud(me);
+    this.updateScoreboard(state.players);
+    this.updateMatchUi(state.match);
   }
 
   private syncViews(players: StatePlayers): void {
@@ -202,12 +270,14 @@ export class ArenaScene extends Phaser.Scene {
       view.targetY = p.y;
       view.angle = p.angle;
       view.alive = p.alive;
+      view.label.setText(p.name);
     });
 
     this.views.forEach((view, id) => {
       if (!seen.has(id)) {
         view.rect.destroy();
         view.muzzle.destroy();
+        view.label.destroy();
         this.views.delete(id);
       }
     });
@@ -219,7 +289,11 @@ export class ArenaScene extends Phaser.Scene {
       .rectangle(0, 0, PLAYER_SIZE, PLAYER_SIZE, isLocal ? 0x4ea1ff : 0xff7a59)
       .setDepth(2);
     const muzzle = this.add.rectangle(0, 0, 14, 6, 0xffd166).setDepth(3);
-    return { rect, muzzle, targetX: 0, targetY: 0, angle: 0, alive: true };
+    const label = this.add
+      .text(0, 0, "", { fontFamily: "monospace", fontSize: "11px", color: "#cdd9e5" })
+      .setOrigin(0.5, 1)
+      .setDepth(4);
+    return { rect, muzzle, label, targetX: 0, targetY: 0, angle: 0, alive: true };
   }
 
   private handleLocalInput(me: PlayerState, deltaMs: number): void {
@@ -259,8 +333,6 @@ export class ArenaScene extends Phaser.Scene {
     if (Phaser.Input.Keyboard.JustDown(this.keyR)) this.room!.send("reload");
 
     if (me.alive) {
-      // Record this input, drop ones the server already processed, then
-      // replay the rest from the authoritative position (reconciliation).
       this.pending.push(cmd);
       this.pending = this.pending.filter((c) => c.seq > me.lastSeq);
       let x = me.x;
@@ -289,8 +361,10 @@ export class ArenaScene extends Phaser.Scene {
         view.rect.setRotation(view.angle);
         this.positionMuzzle(view, view.angle);
       }
+      view.label.setPosition(view.rect.x, view.rect.y - PLAYER.RADIUS - 6);
       view.rect.setAlpha(view.alive ? 1 : 0.25);
       view.muzzle.setVisible(view.alive);
+      view.label.setAlpha(view.alive ? 1 : 0.4);
     });
   }
 
@@ -324,6 +398,12 @@ export class ArenaScene extends Phaser.Scene {
     }
   }
 
+  private drawKillFeed(): void {
+    const now = this.time.now;
+    this.killFeed = this.killFeed.filter((k) => k.until > now);
+    this.killFeedText.setText(this.killFeed.map((k) => `${k.killer} ▸ ${k.victim}`).join("\n"));
+  }
+
   private updateHud(me: PlayerState | undefined): void {
     if (!me) {
       this.hudText.setText("Connecting…");
@@ -333,8 +413,40 @@ export class ArenaScene extends Phaser.Scene {
     const dead = me.alive ? "" : "   ☠ respawning…";
     this.hudText.setText(
       `Triggerman   HP ${Math.max(0, Math.round(me.hp))}/${me.maxHp}   ` +
-        `Ammo ${ammo}   Kills ${me.kills}${dead}\n` +
+        `Ammo ${ammo}   Score ${me.score}${dead}\n` +
         "WASD move · mouse aim · hold click to fire · R reload",
     );
+  }
+
+  private updateScoreboard(players: StatePlayers): void {
+    const rows: { name: string; score: number; kills: number; deaths: number; id: string }[] = [];
+    players.forEach((p, id) => {
+      rows.push({ name: p.name, score: p.score, kills: p.kills, deaths: p.deaths, id });
+    });
+    rows.sort((a, b) => b.score - a.score || b.kills - a.kills);
+
+    const lines = ["── SCOREBOARD ──"];
+    rows.slice(0, SCOREBOARD_ROWS).forEach((r, i) => {
+      const marker = r.id === this.mySessionId ? "▸" : " ";
+      const rank = `${i + 1}`.padStart(2);
+      const name = r.name.padEnd(12).slice(0, 12);
+      const score = `${r.score}`.padStart(5);
+      lines.push(`${marker}${rank} ${name} ${score}  ${r.kills}/${r.deaths}`);
+    });
+    this.scoreboardText.setText(lines.join("\n"));
+  }
+
+  private updateMatchUi(match: MatchStateView): void {
+    const seconds = Math.max(0, Math.ceil(match.timeRemainingMs / 1000));
+    const mm = Math.floor(seconds / 60);
+    const ss = `${seconds % 60}`.padStart(2, "0");
+    this.matchText.setText(`FFA   ${mm}:${ss}   first to ${match.targetScore}`);
+
+    if (match.phase === "ended") {
+      const winner = match.winnerName.length > 0 ? match.winnerName : "—";
+      this.bannerText.setText(`ROUND OVER\nWinner: ${winner}\nnext round starting…`).setVisible(true);
+    } else {
+      this.bannerText.setVisible(false);
+    }
   }
 }

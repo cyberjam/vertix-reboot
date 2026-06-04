@@ -35,3 +35,18 @@ export const MACHINEGUN = {
 
 /** Delay before a dead player respawns (ms). */
 export const RESPAWN_MS = 2000;
+
+/**
+ * Free-For-All match rules. Confirmed from Vertix.io: first to 1500 points
+ * (≈15 kills at 100/kill) over a ~4 minute round.
+ */
+export const FFA = {
+  /** Points awarded per kill. */
+  KILL_SCORE: 100,
+  /** Score that ends the round (first to reach it wins). */
+  TARGET_SCORE: 1500,
+  /** Round length (ms). */
+  DURATION_MS: 4 * 60 * 1000,
+  /** How long the end-of-round screen shows before the next round (ms). */
+  END_SCREEN_MS: 5000,
+} as const;
