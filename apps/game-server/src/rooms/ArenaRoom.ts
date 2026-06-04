@@ -5,28 +5,39 @@ import {
   PLAYER,
   MACHINEGUN,
   RESPAWN_MS,
+  MAX_INPUT_DT_MS,
   clamp,
+  stepMovement,
   rayCircleDistance,
   type InputMessage,
   type ShotMessage,
 } from "@vertix/shared";
 import { GameState, Player } from "../schema/GameState";
 
-type InputState = { moveX: number; moveY: number; aim: number; firing: boolean };
+/** Latest aim/fire intent (responsive), separate from queued movement. */
+type LatestInput = { aim: number; firing: boolean };
 type Timers = { nextFireAt: number; reloadEndsAt: number; respawnAt: number };
 
 /** How far from the arena center players spawn (keeps fights close in M3). */
 const SPAWN_SPREAD = 300;
+/** Max queued movement commands consumed per tick (anti-burst). */
+const MAX_CMDS_PER_TICK = 10;
+/** Hard cap on a player's pending movement queue. */
+const MAX_QUEUE = 120;
 
 /**
  * ArenaRoom — authoritative simulation of one match.
  *
  * The server owns all movement, firing, hit detection and health. Clients send
- * only intent ("input"/"reload"); the server resolves outcomes each tick and
- * replicates state. Everyone is a Triggerman for this milestone.
+ * only intent; the server resolves outcomes each tick and replicates state.
+ *
+ * Movement is processed as an ordered queue of per-command inputs (each with
+ * its own dt), and the last processed sequence is replicated so clients can
+ * predict locally and reconcile exactly against the authoritative position.
  */
 export class ArenaRoom extends Room<GameState> {
-  private readonly inputs = new Map<string, InputState>();
+  private readonly latest = new Map<string, LatestInput>();
+  private readonly queues = new Map<string, InputMessage[]>();
   private readonly timers = new Map<string, Timers>();
   private readonly reloadQueued = new Set<string>();
   private elapsed = 0;
@@ -36,12 +47,24 @@ export class ArenaRoom extends Room<GameState> {
     this.setPatchRate(NET.PATCHRATE_MS);
 
     this.onMessage<InputMessage>("input", (client, msg) => {
-      const input = this.inputs.get(client.sessionId);
-      if (!input || !msg) return;
-      input.moveX = clamp(Number(msg.moveX) || 0, -1, 1);
-      input.moveY = clamp(Number(msg.moveY) || 0, -1, 1);
-      input.aim = Number.isFinite(msg.aim) ? msg.aim : input.aim;
-      input.firing = Boolean(msg.firing);
+      if (!msg) return;
+      const latest = this.latest.get(client.sessionId);
+      const queue = this.queues.get(client.sessionId);
+      if (!latest || !queue) return;
+
+      const cmd: InputMessage = {
+        seq: Number(msg.seq) || 0,
+        dtMs: clamp(Number(msg.dtMs) || 0, 0, MAX_INPUT_DT_MS),
+        moveX: clamp(Number(msg.moveX) || 0, -1, 1),
+        moveY: clamp(Number(msg.moveY) || 0, -1, 1),
+        aim: Number.isFinite(msg.aim) ? msg.aim : latest.aim,
+        firing: Boolean(msg.firing),
+      };
+      queue.push(cmd);
+      if (queue.length > MAX_QUEUE) queue.shift();
+
+      latest.aim = cmd.aim;
+      latest.firing = cmd.firing;
     });
 
     this.onMessage("reload", (client) => {
@@ -58,14 +81,16 @@ export class ArenaRoom extends Room<GameState> {
     player.x = spawn.x;
     player.y = spawn.y;
     this.state.players.set(client.sessionId, player);
-    this.inputs.set(client.sessionId, { moveX: 0, moveY: 0, aim: 0, firing: false });
+    this.latest.set(client.sessionId, { aim: 0, firing: false });
+    this.queues.set(client.sessionId, []);
     this.timers.set(client.sessionId, { nextFireAt: 0, reloadEndsAt: 0, respawnAt: 0 });
     console.log(`[ArenaRoom] joined: ${client.sessionId}`);
   }
 
   onLeave(client: Client): void {
     this.state.players.delete(client.sessionId);
-    this.inputs.delete(client.sessionId);
+    this.latest.delete(client.sessionId);
+    this.queues.delete(client.sessionId);
     this.timers.delete(client.sessionId);
     this.reloadQueued.delete(client.sessionId);
     console.log(`[ArenaRoom] left: ${client.sessionId}`);
@@ -76,33 +101,38 @@ export class ArenaRoom extends Room<GameState> {
     const now = this.elapsed;
 
     this.state.players.forEach((player, id) => {
-      const input = this.inputs.get(id);
+      const latest = this.latest.get(id);
+      const queue = this.queues.get(id);
       const timers = this.timers.get(id);
-      if (!input || !timers) return;
+      if (!latest || !queue || !timers) return;
 
       if (!player.alive) {
+        // Acknowledge queued inputs without moving, then respawn when due.
+        const tail = queue[queue.length - 1];
+        if (tail) player.lastSeq = tail.seq;
+        queue.length = 0;
         if (now >= timers.respawnAt) this.respawn(player, timers);
         return;
       }
 
-      this.applyMovement(player, input, dt);
-      player.angle = input.aim;
+      this.consumeMovement(player, queue);
+      player.angle = latest.aim;
       this.applyReload(id, player, timers, now);
-      this.applyFiring(id, player, input, timers, now);
+      this.applyFiring(id, player, latest.firing, timers, now);
     });
   }
 
-  private applyMovement(player: Player, input: InputState, dt: number): void {
-    let mx = input.moveX;
-    let my = input.moveY;
-    const len = Math.hypot(mx, my);
-    if (len > 0) {
-      mx /= len;
-      my /= len;
+  private consumeMovement(player: Player, queue: InputMessage[]): void {
+    let processed = 0;
+    while (queue.length > 0 && processed < MAX_CMDS_PER_TICK) {
+      const cmd = queue.shift();
+      if (!cmd) break;
+      const next = stepMovement(player.x, player.y, cmd.moveX, cmd.moveY, cmd.dtMs);
+      player.x = next.x;
+      player.y = next.y;
+      player.lastSeq = cmd.seq;
+      processed += 1;
     }
-    const distance = PLAYER.SPEED * (dt / 1000);
-    player.x = clamp(player.x + mx * distance, PLAYER.RADIUS, WORLD.WIDTH - PLAYER.RADIUS);
-    player.y = clamp(player.y + my * distance, PLAYER.RADIUS, WORLD.HEIGHT - PLAYER.RADIUS);
   }
 
   private applyReload(id: string, player: Player, timers: Timers, now: number): void {
@@ -123,11 +153,11 @@ export class ArenaRoom extends Room<GameState> {
   private applyFiring(
     id: string,
     player: Player,
-    input: InputState,
+    firing: boolean,
     timers: Timers,
     now: number,
   ): void {
-    if (!input.firing || player.reloading || player.ammo <= 0 || now < timers.nextFireAt) {
+    if (!firing || player.reloading || player.ammo <= 0 || now < timers.nextFireAt) {
       return;
     }
 

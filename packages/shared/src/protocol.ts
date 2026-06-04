@@ -5,8 +5,10 @@
 
 /** Continuous client input, sent every client frame (message type "input"). */
 export type InputMessage = {
-  /** Monotonic sequence number (reserved for future reconciliation). */
+  /** Monotonic sequence number, used for client prediction reconciliation. */
   seq: number;
+  /** Duration (ms) this input covers, used for deterministic movement. */
+  dtMs: number;
   /** Movement intent on each axis, each in the range [-1, 1]. */
   moveX: number;
   moveY: number;
