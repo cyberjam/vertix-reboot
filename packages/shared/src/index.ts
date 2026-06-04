@@ -17,3 +17,4 @@ export * from "./gameplay";
 export * from "./protocol";
 export * from "./math";
 export * from "./sim";
+export * from "./maps";
