@@ -15,6 +15,7 @@
 | 01 | [game-analysis.md](./01-game-analysis.md) | 핵심 게임 루프 / 클래스 / 무기 / 맵 / 리스폰 / 힐팩 / 점수 시스템 분석 |
 | 02 | [mvp-scope.md](./02-mvp-scope.md) | MVP 범위 정의 |
 | 03 | [technical-design.md](./03-technical-design.md) | 기술 설계 (Next.js + Phaser 3 + Colyseus + Supabase): 프로젝트/멀티플레이/엔티티/클래스/무기/상태동기화/DB/권위서버 |
+| 04 | [milestones.md](./04-milestones.md) | 개발 마일스톤 (M1~M16, 각 1~3시간·독립 테스트·순차 개발) |
 
 ## ⚠️ 자료 출처 및 신뢰도에 관한 중요한 고지
 
