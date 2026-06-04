@@ -5,12 +5,15 @@ import {
   PLAYER,
   MACHINEGUN,
   RESPAWN_MS,
+  FFA,
   MAX_INPUT_DT_MS,
   clamp,
   stepMovement,
   rayCircleDistance,
   type InputMessage,
   type ShotMessage,
+  type KillMessage,
+  type JoinOptions,
 } from "@vertix/shared";
 import { GameState, Player } from "../schema/GameState";
 
@@ -24,16 +27,22 @@ const SPAWN_SPREAD = 300;
 const MAX_CMDS_PER_TICK = 10;
 /** Hard cap on a player's pending movement queue. */
 const MAX_QUEUE = 120;
+const MAX_NAME_LENGTH = 16;
+
+function envNumber(name: string, fallback: number): number {
+  const raw = process.env[name];
+  if (raw === undefined) return fallback;
+  const value = Number(raw);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
 
 /**
- * ArenaRoom — authoritative simulation of one match.
+ * ArenaRoom — authoritative simulation of one Free-For-All match.
  *
- * The server owns all movement, firing, hit detection and health. Clients send
- * only intent; the server resolves outcomes each tick and replicates state.
- *
- * Movement is processed as an ordered queue of per-command inputs (each with
- * its own dt), and the last processed sequence is replicated so clients can
- * predict locally and reconcile exactly against the authoritative position.
+ * The server owns all movement, firing, hit detection, health and scoring.
+ * Clients send only intent; the server resolves outcomes each tick, runs the
+ * FFA round loop (first to target score, or time limit, then a result screen
+ * and a fresh round) and replicates state.
  */
 export class ArenaRoom extends Room<GameState> {
   private readonly latest = new Map<string, LatestInput>();
@@ -41,9 +50,17 @@ export class ArenaRoom extends Room<GameState> {
   private readonly timers = new Map<string, Timers>();
   private readonly reloadQueued = new Set<string>();
   private elapsed = 0;
+  private matchEndAt = 0;
+
+  // FFA rules (env-overridable for tuning / testing).
+  private readonly targetScore = envNumber("FFA_TARGET_SCORE", FFA.TARGET_SCORE);
+  private readonly durationMs = envNumber("FFA_DURATION_MS", FFA.DURATION_MS);
+  private readonly endScreenMs = envNumber("FFA_END_SCREEN_MS", FFA.END_SCREEN_MS);
 
   onCreate(): void {
     this.setState(new GameState());
+    this.state.match.targetScore = this.targetScore;
+    this.state.match.timeRemainingMs = this.durationMs;
     this.setPatchRate(NET.PATCHRATE_MS);
 
     this.onMessage<InputMessage>("input", (client, msg) => {
@@ -75,8 +92,9 @@ export class ArenaRoom extends Room<GameState> {
     console.log(`[ArenaRoom] created: ${this.roomId}`);
   }
 
-  onJoin(client: Client): void {
+  onJoin(client: Client, options?: JoinOptions): void {
     const player = new Player();
+    player.name = this.sanitizeName(options?.name, client.sessionId);
     const spawn = this.randomSpawn();
     player.x = spawn.x;
     player.y = spawn.y;
@@ -84,7 +102,7 @@ export class ArenaRoom extends Room<GameState> {
     this.latest.set(client.sessionId, { aim: 0, firing: false });
     this.queues.set(client.sessionId, []);
     this.timers.set(client.sessionId, { nextFireAt: 0, reloadEndsAt: 0, respawnAt: 0 });
-    console.log(`[ArenaRoom] joined: ${client.sessionId}`);
+    console.log(`[ArenaRoom] joined: ${player.name} (${client.sessionId})`);
   }
 
   onLeave(client: Client): void {
@@ -99,6 +117,13 @@ export class ArenaRoom extends Room<GameState> {
   private update(dt: number): void {
     this.elapsed += dt;
     const now = this.elapsed;
+    const match = this.state.match;
+
+    if (match.phase === "playing") {
+      match.timeRemainingMs = Math.max(0, match.timeRemainingMs - dt);
+    } else if (now >= this.matchEndAt) {
+      this.resetMatch();
+    }
 
     this.state.players.forEach((player, id) => {
       const latest = this.latest.get(id);
@@ -107,7 +132,6 @@ export class ArenaRoom extends Room<GameState> {
       if (!latest || !queue || !timers) return;
 
       if (!player.alive) {
-        // Acknowledge queued inputs without moving, then respawn when due.
         const tail = queue[queue.length - 1];
         if (tail) player.lastSeq = tail.seq;
         queue.length = 0;
@@ -117,9 +141,17 @@ export class ArenaRoom extends Room<GameState> {
 
       this.consumeMovement(player, queue);
       player.angle = latest.aim;
-      this.applyReload(id, player, timers, now);
-      this.applyFiring(id, player, latest.firing, timers, now);
+
+      // Combat only happens during a live round.
+      if (match.phase === "playing") {
+        this.applyReload(id, player, timers, now);
+        this.applyFiring(id, player, latest.firing, timers, now);
+      }
     });
+
+    if (match.phase === "playing" && match.timeRemainingMs <= 0) {
+      this.endMatch();
+    }
   }
 
   private consumeMovement(player: Player, queue: InputMessage[]): void {
@@ -203,12 +235,7 @@ export class ArenaRoom extends Room<GameState> {
       const hitPlayer = victim as Player;
       hitPlayer.hp -= MACHINEGUN.damage;
       if (hitPlayer.hp <= 0) {
-        hitPlayer.hp = 0;
-        hitPlayer.alive = false;
-        hitPlayer.deaths += 1;
-        const victimTimers = this.timers.get(victimId);
-        if (victimTimers) victimTimers.respawnAt = this.elapsed + RESPAWN_MS;
-        shooter.kills += 1;
+        this.handleKill(shooterId, shooter, victimId, hitPlayer);
       }
     }
 
@@ -220,6 +247,73 @@ export class ArenaRoom extends Room<GameState> {
       hit: victim !== null,
     };
     this.broadcast("shot", shot);
+  }
+
+  private handleKill(
+    shooterId: string,
+    shooter: Player,
+    victimId: string,
+    victim: Player,
+  ): void {
+    victim.hp = 0;
+    victim.alive = false;
+    victim.deaths += 1;
+    const victimTimers = this.timers.get(victimId);
+    if (victimTimers) victimTimers.respawnAt = this.elapsed + RESPAWN_MS;
+
+    shooter.kills += 1;
+    shooter.score += FFA.KILL_SCORE;
+
+    const kill: KillMessage = { killerName: shooter.name, victimName: victim.name };
+    this.broadcast("kill", kill);
+
+    if (shooter.score >= this.state.match.targetScore) {
+      this.endMatch(shooterId);
+    }
+  }
+
+  private endMatch(winnerId?: string): void {
+    const match = this.state.match;
+    if (match.phase !== "playing") return;
+
+    const id = winnerId ?? this.topPlayerId();
+    const winner = id ? this.state.players.get(id) : undefined;
+    match.phase = "ended";
+    match.winnerId = id;
+    match.winnerName = winner ? winner.name : "";
+    this.matchEndAt = this.elapsed + this.endScreenMs;
+  }
+
+  private topPlayerId(): string {
+    let bestId = "";
+    let bestScore = -1;
+    this.state.players.forEach((player, id) => {
+      if (player.score > bestScore) {
+        bestScore = player.score;
+        bestId = id;
+      }
+    });
+    return bestId;
+  }
+
+  private resetMatch(): void {
+    const match = this.state.match;
+    match.phase = "playing";
+    match.timeRemainingMs = this.durationMs;
+    match.winnerId = "";
+    match.winnerName = "";
+
+    this.state.players.forEach((player, id) => {
+      player.score = 0;
+      player.kills = 0;
+      player.deaths = 0;
+      const timers = this.timers.get(id) ?? {
+        nextFireAt: 0,
+        reloadEndsAt: 0,
+        respawnAt: 0,
+      };
+      this.respawn(player, timers);
+    });
   }
 
   private respawn(player: Player, timers: Timers): void {
@@ -240,5 +334,10 @@ export class ArenaRoom extends Room<GameState> {
       x: WORLD.WIDTH / 2 + (Math.random() * 2 - 1) * SPAWN_SPREAD,
       y: WORLD.HEIGHT / 2 + (Math.random() * 2 - 1) * SPAWN_SPREAD,
     };
+  }
+
+  private sanitizeName(raw: string | undefined, sessionId: string): string {
+    const trimmed = (raw ?? "").trim().slice(0, MAX_NAME_LENGTH);
+    return trimmed.length > 0 ? trimmed : `Guest-${sessionId.slice(0, 4)}`;
   }
 }
