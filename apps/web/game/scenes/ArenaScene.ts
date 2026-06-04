@@ -4,6 +4,7 @@ import {
   WORLD,
   PLAYER,
   MACHINEGUN,
+  ARENA01,
   stepMovement,
   type InputMessage,
   type ShotMessage,
@@ -136,6 +137,8 @@ export class ArenaScene extends Phaser.Scene {
       .rectangle(WORLD.WIDTH / 2, WORLD.HEIGHT / 2, WORLD.WIDTH, WORLD.HEIGHT)
       .setStrokeStyle(2, 0x4ea1ff, 0.5);
 
+    this.buildMap();
+
     this.tracerGraphics = this.add.graphics().setDepth(1);
     this.aimGraphics = this.add.graphics().setDepth(1);
 
@@ -156,6 +159,28 @@ export class ArenaScene extends Phaser.Scene {
     this.events.once(Phaser.Scenes.Events.DESTROY, leave);
 
     void this.connect();
+  }
+
+  private buildMap(): void {
+    // Walls (cover / line-of-sight blockers).
+    for (const wall of ARENA01.walls) {
+      this.add
+        .rectangle(wall.x + wall.w / 2, wall.y + wall.h / 2, wall.w, wall.h, 0x39435c)
+        .setStrokeStyle(2, 0x5a6b8c)
+        .setDepth(0);
+    }
+    // Health pack locations (markers; pickup logic is a later milestone).
+    for (const hp of ARENA01.healthPacks) {
+      this.add.circle(hp.x, hp.y, 16, 0x2ecc71, 0.18).setDepth(0);
+      this.add
+        .text(hp.x, hp.y, "✚", {
+          fontFamily: "monospace",
+          fontSize: "20px",
+          color: "#2ecc71",
+        })
+        .setOrigin(0.5)
+        .setDepth(0);
+    }
   }
 
   private buildHud(): void {
@@ -338,7 +363,7 @@ export class ArenaScene extends Phaser.Scene {
       let x = me.x;
       let y = me.y;
       for (const c of this.pending) {
-        const next = stepMovement(x, y, c.moveX, c.moveY, c.dtMs);
+        const next = stepMovement(x, y, c.moveX, c.moveY, c.dtMs, ARENA01.walls);
         x = next.x;
         y = next.y;
       }

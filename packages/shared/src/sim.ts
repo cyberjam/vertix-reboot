@@ -1,3 +1,4 @@
+import type { RectWall } from "./maps";
 import { PLAYER, WORLD } from "./gameplay";
 import { clamp } from "./math";
 
@@ -9,13 +10,23 @@ export interface Vec2 {
   y: number;
 }
 
+/** True if a circle of radius r at (px,py) overlaps the wall. */
+function overlapsWall(px: number, py: number, wall: RectWall, r: number): boolean {
+  return (
+    px > wall.x - r &&
+    px < wall.x + wall.w + r &&
+    py > wall.y - r &&
+    py < wall.y + wall.h + r
+  );
+}
+
 /**
  * Deterministic movement step shared by the client (prediction) and the server
- * (authoritative simulation). Given a position and a movement command, returns
- * the new clamped position.
+ * (authoritative simulation). Applies movement, world bounds and wall
+ * collision (circle vs AABB, resolved per axis so players slide along walls).
  *
- * Both sides MUST use this exact function so that client-side prediction can be
- * reconciled against the server without drift.
+ * Both sides MUST use this exact function with the same walls so that client
+ * prediction reconciles against the server without drift.
  */
 export function stepMovement(
   x: number,
@@ -23,6 +34,7 @@ export function stepMovement(
   moveX: number,
   moveY: number,
   dtMs: number,
+  walls: readonly RectWall[],
 ): Vec2 {
   let mx = moveX;
   let my = moveY;
@@ -33,8 +45,24 @@ export function stepMovement(
   }
   const dt = clamp(dtMs, 0, MAX_INPUT_DT_MS) / 1000;
   const distance = PLAYER.SPEED * dt;
-  return {
-    x: clamp(x + mx * distance, PLAYER.RADIUS, WORLD.WIDTH - PLAYER.RADIUS),
-    y: clamp(y + my * distance, PLAYER.RADIUS, WORLD.HEIGHT - PLAYER.RADIUS),
-  };
+  const r = PLAYER.RADIUS;
+
+  // Resolve X, then Y, against walls (axis separation => sliding).
+  let nx = clamp(x + mx * distance, r, WORLD.WIDTH - r);
+  for (const wall of walls) {
+    if (overlapsWall(nx, y, wall, r)) {
+      if (mx > 0) nx = wall.x - r;
+      else if (mx < 0) nx = wall.x + wall.w + r;
+    }
+  }
+
+  let ny = clamp(y + my * distance, r, WORLD.HEIGHT - r);
+  for (const wall of walls) {
+    if (overlapsWall(nx, ny, wall, r)) {
+      if (my > 0) ny = wall.y - r;
+      else if (my < 0) ny = wall.y + wall.h + r;
+    }
+  }
+
+  return { x: nx, y: ny };
 }
