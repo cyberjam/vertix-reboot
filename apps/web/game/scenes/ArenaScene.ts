@@ -1,12 +1,18 @@
 import Phaser from "phaser";
 import { Client, type Room } from "colyseus.js";
-import { WORLD, PLAYER, MACHINEGUN, clamp, type ShotMessage } from "@vertix/shared";
+import {
+  WORLD,
+  PLAYER,
+  MACHINEGUN,
+  stepMovement,
+  type InputMessage,
+  type ShotMessage,
+} from "@vertix/shared";
 
 const PLAYER_SIZE = PLAYER.RADIUS * 2;
 const AIM_LINE_LENGTH = 220;
 const RETICLE_RADIUS = 6;
 const INTERP = 0.25; // interpolation factor for remote players
-const RECONCILE_THRESHOLD = 48; // px drift before snapping local prediction
 const TRACER_MS = 70;
 const SERVER_URL = process.env.NEXT_PUBLIC_GAME_SERVER_URL ?? "ws://localhost:2567";
 
@@ -22,6 +28,7 @@ interface PlayerState {
   alive: boolean;
   kills: number;
   deaths: number;
+  lastSeq: number;
 }
 
 interface StatePlayers {
@@ -57,10 +64,11 @@ type WASDKeys = {
 /**
  * ArenaScene — top-down TPS client for the authoritative Colyseus server.
  *
- * The scene sends only input; the server owns movement, firing, hit detection
- * and health. Remote players are interpolated toward their server positions;
- * the local player is predicted for responsiveness and snapped back if it
- * drifts too far from the authoritative position.
+ * The client sends only input; the server owns movement, firing, hit detection
+ * and health. The local player is predicted immediately and reconciled every
+ * frame by replaying inputs the server has not yet acknowledged on top of the
+ * authoritative position. Remote players are interpolated toward their server
+ * positions.
  */
 export class ArenaScene extends Phaser.Scene {
   private client?: Client;
@@ -70,6 +78,7 @@ export class ArenaScene extends Phaser.Scene {
   private readonly views = new Map<string, PlayerView>();
   private readonly predicted = new Phaser.Math.Vector2();
   private readonly aimWorld = new Phaser.Math.Vector2();
+  private pending: InputMessage[] = [];
   private localAim = 0;
   private seq = 0;
   private tracers: Tracer[] = [];
@@ -214,8 +223,6 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private handleLocalInput(me: PlayerState, deltaMs: number): void {
-    const dt = deltaMs / 1000;
-
     let mx = 0;
     let my = 0;
     if (this.keys.A.isDown) mx -= 1;
@@ -240,33 +247,32 @@ export class ArenaScene extends Phaser.Scene {
 
     const firing = pointer.leftButtonDown();
     this.seq += 1;
-    this.room!.send("input", {
+    const cmd: InputMessage = {
       seq: this.seq,
+      dtMs: deltaMs,
       moveX: mx,
       moveY: my,
       aim: this.localAim,
       firing,
-    });
+    };
+    this.room!.send("input", cmd);
     if (Phaser.Input.Keyboard.JustDown(this.keyR)) this.room!.send("reload");
 
-    // Local prediction (server remains authoritative).
     if (me.alive) {
-      const distance = PLAYER.SPEED * dt;
-      this.predicted.x = clamp(
-        this.predicted.x + mx * distance,
-        PLAYER.RADIUS,
-        WORLD.WIDTH - PLAYER.RADIUS,
-      );
-      this.predicted.y = clamp(
-        this.predicted.y + my * distance,
-        PLAYER.RADIUS,
-        WORLD.HEIGHT - PLAYER.RADIUS,
-      );
-    }
-    if (
-      Phaser.Math.Distance.Between(this.predicted.x, this.predicted.y, me.x, me.y) >
-      RECONCILE_THRESHOLD
-    ) {
+      // Record this input, drop ones the server already processed, then
+      // replay the rest from the authoritative position (reconciliation).
+      this.pending.push(cmd);
+      this.pending = this.pending.filter((c) => c.seq > me.lastSeq);
+      let x = me.x;
+      let y = me.y;
+      for (const c of this.pending) {
+        const next = stepMovement(x, y, c.moveX, c.moveY, c.dtMs);
+        x = next.x;
+        y = next.y;
+      }
+      this.predicted.set(x, y);
+    } else {
+      this.pending.length = 0;
       this.predicted.set(me.x, me.y);
     }
   }

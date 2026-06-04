@@ -16,6 +16,8 @@ export class Player extends Schema {
   @type("boolean") alive = true;
   @type("number") kills = 0;
   @type("number") deaths = 0;
+  /** Last input sequence the server has processed (for client reconciliation). */
+  @type("number") lastSeq = 0;
 }
 
 export class GameState extends Schema {
