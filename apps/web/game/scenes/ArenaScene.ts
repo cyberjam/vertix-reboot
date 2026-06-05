@@ -77,6 +77,8 @@ interface PlayerView {
   targetY: number;
   angle: number;
   alive: boolean;
+  prevAlive: boolean;
+  color: number;
 }
 
 interface Tracer {
@@ -138,6 +140,9 @@ export class ArenaScene extends Phaser.Scene {
   private scoreboardText!: Phaser.GameObjects.Text;
   private killFeedText!: Phaser.GameObjects.Text;
   private bannerText!: Phaser.GameObjects.Text;
+  private damageFlash!: Phaser.GameObjects.Rectangle;
+  private prevMyHp = 0;
+  private prevMyAlive = true;
 
   constructor() {
     super("arena");
@@ -240,6 +245,12 @@ export class ArenaScene extends Phaser.Scene {
       .setScrollFactor(0)
       .setDepth(11)
       .setVisible(false);
+
+    // Full-screen red flash when the local player takes damage.
+    this.damageFlash = this.add
+      .rectangle(width / 2, height / 2, width, height, 0xff3030, 0)
+      .setScrollFactor(0)
+      .setDepth(20);
   }
 
   private async connect(): Promise<void> {
@@ -265,6 +276,11 @@ export class ArenaScene extends Phaser.Scene {
         hit: msg.hit,
         until: this.time.now + TRACER_MS,
       });
+      this.spawnMuzzle(msg.sx, msg.sy);
+      if (msg.by === this.mySessionId && msg.hit) {
+        this.showHitmarker();
+        this.cameras.main.shake(60, 0.004);
+      }
     });
     this.room.onMessage("kill", (msg: KillMessage) => {
       this.killFeed.push({
@@ -291,7 +307,10 @@ export class ArenaScene extends Phaser.Scene {
     this.updateHealthPacks(state.healthPacks);
 
     const me = state.players.get(this.mySessionId);
-    if (me) this.handleLocalInput(me, deltaMs);
+    if (me) {
+      this.handleLocalInput(me, deltaMs);
+      this.trackLocalFeedback(me);
+    }
     this.renderViews();
     if (me) this.drawAim();
     this.updateHud(me);
@@ -319,7 +338,8 @@ export class ArenaScene extends Phaser.Scene {
       view.angle = p.angle;
       view.alive = p.alive;
       view.label.setText(p.name);
-      view.rect.setFillStyle(getClass(p.classId).color);
+      view.color = getClass(p.classId).color;
+      view.rect.setFillStyle(view.color);
     });
 
     this.views.forEach((view, id) => {
@@ -364,7 +384,17 @@ export class ArenaScene extends Phaser.Scene {
       .text(0, 0, "", { fontFamily: "monospace", fontSize: "11px", color: "#cdd9e5" })
       .setOrigin(0.5, 1)
       .setDepth(4);
-    return { rect, muzzle, label, targetX: 0, targetY: 0, angle: 0, alive: true };
+    return {
+      rect,
+      muzzle,
+      label,
+      targetX: 0,
+      targetY: 0,
+      angle: 0,
+      alive: true,
+      prevAlive: true,
+      color: 0x888888,
+    };
   }
 
   private handleLocalInput(me: PlayerState, deltaMs: number): void {
@@ -451,6 +481,53 @@ export class ArenaScene extends Phaser.Scene {
       view.rect.setAlpha(view.alive ? 1 : 0.25);
       view.muzzle.setVisible(view.alive);
       view.label.setAlpha(view.alive ? 1 : 0.4);
+
+      // Death burst when a player dies.
+      if (view.prevAlive && !view.alive) {
+        this.spawnDeathRing(view.rect.x, view.rect.y, view.color);
+      }
+      view.prevAlive = view.alive;
+    });
+  }
+
+  private spawnDeathRing(x: number, y: number, color: number): void {
+    const ring = this.add.circle(x, y, PLAYER.RADIUS, color, 0).setStrokeStyle(3, color).setDepth(5);
+    this.tweens.add({
+      targets: ring,
+      scale: 3,
+      alpha: 0,
+      duration: 350,
+      ease: "Cubic.Out",
+      onComplete: () => ring.destroy(),
+    });
+  }
+
+  private spawnMuzzle(x: number, y: number): void {
+    const flash = this.add.circle(x, y, 7, 0xffe08a, 0.95).setDepth(4);
+    this.tweens.add({
+      targets: flash,
+      alpha: 0,
+      scale: 0.4,
+      duration: 70,
+      onComplete: () => flash.destroy(),
+    });
+  }
+
+  private showHitmarker(): void {
+    const marker = this.add
+      .text(this.aimWorld.x, this.aimWorld.y, "✕", {
+        fontFamily: "monospace",
+        fontSize: "22px",
+        color: "#ffffff",
+      })
+      .setOrigin(0.5)
+      .setDepth(9);
+    this.tweens.add({
+      targets: marker,
+      alpha: 0,
+      scale: 1.6,
+      duration: 180,
+      onComplete: () => marker.destroy(),
     });
   }
 
@@ -461,6 +538,20 @@ export class ArenaScene extends Phaser.Scene {
       view.rect.y + Math.sin(angle) * d,
     );
     view.muzzle.setRotation(angle);
+  }
+
+  private trackLocalFeedback(me: PlayerState): void {
+    // Red flash when taking damage (while alive).
+    if (me.alive && me.hp < this.prevMyHp) {
+      this.damageFlash.setAlpha(0.35);
+      this.tweens.add({ targets: this.damageFlash, alpha: 0, duration: 250 });
+    }
+    // Camera shake on death.
+    if (this.prevMyAlive && !me.alive) {
+      this.cameras.main.shake(250, 0.012);
+    }
+    this.prevMyHp = me.hp;
+    this.prevMyAlive = me.alive;
   }
 
   private drawAim(): void {
