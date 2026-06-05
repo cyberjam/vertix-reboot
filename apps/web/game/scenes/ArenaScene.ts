@@ -129,6 +129,7 @@ export class ArenaScene extends Phaser.Scene {
   private keyR!: Phaser.Input.Keyboard.Key;
   private keyOne!: Phaser.Input.Keyboard.Key;
   private keyTwo!: Phaser.Input.Keyboard.Key;
+  private keyThree!: Phaser.Input.Keyboard.Key;
   private keyQ!: Phaser.Input.Keyboard.Key;
   private aimGraphics!: Phaser.GameObjects.Graphics;
   private tracerGraphics!: Phaser.GameObjects.Graphics;
@@ -175,6 +176,7 @@ export class ArenaScene extends Phaser.Scene {
     this.keyR = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.keyOne = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ONE);
     this.keyTwo = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.TWO);
+    this.keyThree = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.THREE);
     this.keyQ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
 
     this.buildHud();
@@ -375,6 +377,10 @@ export class ArenaScene extends Phaser.Scene {
       this.selectedClass = "hunter";
       this.room!.send("selectClass", { classId: "hunter" });
     }
+    if (Phaser.Input.Keyboard.JustDown(this.keyThree)) {
+      this.selectedClass = "vince";
+      this.room!.send("selectClass", { classId: "vince" });
+    }
     if (Phaser.Input.Keyboard.JustDown(this.keyQ)) this.room!.send("switchWeapon");
 
     let mx = 0;
@@ -498,7 +504,7 @@ export class ArenaScene extends Phaser.Scene {
     this.hudText.setText(
       `${className} [${weapon.name}]   HP ${Math.max(0, Math.round(me.hp))}/${me.maxHp}   ` +
         `Ammo ${ammo}   Score ${me.score}${dead}${pending}\n` +
-        "WASD move · mouse aim · click fire · R reload · Q weapon · 1 Triggerman / 2 Hunter",
+        "WASD move · mouse aim · click fire · R reload · Q weapon · 1 Triggerman / 2 Hunter / 3 Vince",
     );
   }
 
