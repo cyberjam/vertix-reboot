@@ -311,6 +311,7 @@ export class ArenaRoom extends Room<GameState> {
     }
 
     const shot: ShotMessage = {
+      by: shooterId,
       sx: shooter.x,
       sy: shooter.y,
       ex: shooter.x + dirX * closest,

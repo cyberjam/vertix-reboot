@@ -20,6 +20,8 @@ export type InputMessage = {
 
 /** Server -> all clients: a shot was fired (message type "shot"). For VFX only. */
 export type ShotMessage = {
+  /** Shooter session id (so a client can recognise its own shots). */
+  by: string;
   /** Origin (shooter position). */
   sx: number;
   sy: number;
