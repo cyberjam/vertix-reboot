@@ -1,0 +1,18 @@
+# Render Blueprint for the Colyseus game server (free plan).
+# Frontend (apps/web) is deployed separately on Vercel.
+services:
+  - type: web
+    name: vertix-game-server
+    runtime: docker
+    plan: free
+    dockerfilePath: ./Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    envVars:
+      # Render injects PORT automatically; Colyseus binds to it.
+      - key: NODE_ENV
+        value: production
+      # Lock this down to your Vercel origin in production if desired (e.g.
+      # https://your-app.vercel.app). "*" is fine for a public game.
+      - key: CORS_ORIGIN
+        value: "*"
