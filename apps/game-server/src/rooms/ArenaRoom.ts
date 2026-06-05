@@ -243,7 +243,7 @@ export class ArenaRoom extends Room<GameState> {
 
     runtime.ammo -= 1;
     runtime.nextFireAt = now + weapon.fireRateMs;
-    this.fireHitscan(id, player, weapon);
+    this.fireWeapon(id, player, weapon);
 
     if (runtime.ammo <= 0) {
       runtime.reloading = true;
@@ -251,9 +251,18 @@ export class ArenaRoom extends Room<GameState> {
     }
   }
 
-  private fireHitscan(shooterId: string, shooter: Player, weapon: WeaponDef): void {
-    const dirX = Math.cos(shooter.angle);
-    const dirY = Math.sin(shooter.angle);
+  private fireWeapon(shooterId: string, shooter: Player, weapon: WeaponDef): void {
+    const pellets = weapon.pellets ?? 1;
+    const spread = ((weapon.spreadDeg ?? 0) * Math.PI) / 180;
+    for (let i = 0; i < pellets; i++) {
+      const offset = pellets > 1 ? (Math.random() - 0.5) * spread : 0;
+      this.fireRay(shooterId, shooter, weapon, shooter.angle + offset);
+    }
+  }
+
+  private fireRay(shooterId: string, shooter: Player, weapon: WeaponDef, angle: number): void {
+    const dirX = Math.cos(angle);
+    const dirY = Math.sin(angle);
 
     let maxRay: number = weapon.rangePx;
     for (const wall of this.map.walls) {

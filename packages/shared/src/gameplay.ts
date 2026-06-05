@@ -47,6 +47,7 @@ export const FFA = {
 export interface WeaponDef {
   id: string;
   name: string;
+  /** Damage per pellet/ray. */
   damage: number;
   magSize: number;
   fireRateMs: number;
@@ -54,6 +55,10 @@ export interface WeaponDef {
   rangePx: number;
   /** true: fires while held; false: one shot per trigger press (semi-auto). */
   auto: boolean;
+  /** Pellets fired per shot (shotguns); defaults to 1. */
+  pellets?: number;
+  /** Total spread cone in degrees for multi-pellet weapons; defaults to 0. */
+  spreadDeg?: number;
 }
 
 // Calibrated values — see docs/design/05-weapon-balance.md for the full
@@ -92,10 +97,24 @@ const MACHINE_PISTOL_DEF: WeaponDef = {
   auto: true,
 };
 
+const SHOTGUN_DEF: WeaponDef = {
+  id: "shotgun",
+  name: "Shotgun",
+  damage: 25, // per pellet; 4 pellets => up to 100 at point blank
+  magSize: 6,
+  fireRateMs: 800, // pump action
+  reloadMs: 1900,
+  rangePx: 480, // short; pellets spread out beyond this
+  auto: false,
+  pellets: 4, // confirmed: Vince fires a spread of 4 pellets
+  spreadDeg: 16,
+};
+
 export const WEAPONS: Record<string, WeaponDef> = {
   machinegun: MACHINEGUN_DEF,
   sniper: SNIPER_DEF,
   machine_pistol: MACHINE_PISTOL_DEF,
+  shotgun: SHOTGUN_DEF,
 };
 
 /** Back-compat default weapon reference. */
@@ -134,12 +153,22 @@ const HUNTER_CLASS: ClassDef = {
   color: 0xc792ea,
 };
 
+const VINCE_CLASS: ClassDef = {
+  id: "vince",
+  name: "Vince",
+  maxHp: 100,
+  primary: "shotgun",
+  secondary: null,
+  color: 0xffa657,
+};
+
 export const CLASSES: Record<string, ClassDef> = {
   triggerman: TRIGGERMAN_CLASS,
   hunter: HUNTER_CLASS,
+  vince: VINCE_CLASS,
 };
 
-export const CLASS_IDS = ["triggerman", "hunter"] as const;
+export const CLASS_IDS = ["triggerman", "hunter", "vince"] as const;
 export const DEFAULT_CLASS = "triggerman";
 
 export function getClass(id: string): ClassDef {
