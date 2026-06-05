@@ -2,15 +2,23 @@
 
 import { useEffect, useRef } from "react";
 import type { Game } from "phaser";
+import type { Room } from "colyseus.js";
+import Hud from "@/components/Hud";
 
 const GAME_WIDTH = 960;
 const GAME_HEIGHT = 540;
 
+interface PhaserGameProps {
+  room: Room;
+  sessionId: string;
+}
+
 /**
- * Mounts the Phaser 3 game (client-only) and runs the ArenaScene:
- * top-view camera, a locally-controlled player, and WASD movement.
+ * Mounts the Phaser 3 game (client-only) and runs the ArenaScene with the live
+ * Colyseus `room` injected as scene data. The connection itself is owned by the
+ * NetProvider; the scene only renders, predicts and sends input.
  */
-export default function PhaserGame() {
+export default function PhaserGame({ room, sessionId }: PhaserGameProps) {
   const containerRef = useRef<HTMLDivElement | null>(null);
   const gameRef = useRef<Game | null>(null);
 
@@ -23,7 +31,7 @@ export default function PhaserGame() {
       const { ArenaScene } = await import("./scenes/ArenaScene");
       if (cancelled || !containerRef.current || gameRef.current) return;
 
-      gameRef.current = new Phaser.Game({
+      const game = new Phaser.Game({
         type: Phaser.AUTO,
         width: GAME_WIDTH,
         height: GAME_HEIGHT,
@@ -33,8 +41,10 @@ export default function PhaserGame() {
           default: "arcade",
           arcade: { debug: false },
         },
-        scene: [ArenaScene],
       });
+      // Autostart the scene with the injected room/sessionId.
+      game.scene.add("arena", ArenaScene, true, { room, sessionId });
+      gameRef.current = game;
     })();
 
     return () => {
@@ -42,12 +52,19 @@ export default function PhaserGame() {
       gameRef.current?.destroy(true);
       gameRef.current = null;
     };
-  }, []);
+  }, [room, sessionId]);
 
   return (
     <div
-      ref={containerRef}
-      style={{ width: GAME_WIDTH, height: GAME_HEIGHT, border: "1px solid #1c2330" }}
-    />
+      style={{
+        position: "relative",
+        width: GAME_WIDTH,
+        height: GAME_HEIGHT,
+        border: "1px solid #1c2330",
+      }}
+    >
+      <div ref={containerRef} style={{ width: GAME_WIDTH, height: GAME_HEIGHT }} />
+      <Hud room={room} sessionId={sessionId} />
+    </div>
   );
 }

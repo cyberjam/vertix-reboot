@@ -16,6 +16,8 @@ export type InputMessage = {
   aim: number;
   /** Whether the fire button is held (Triggerman fires automatically). */
   firing: boolean;
+  /** Whether the jump key is held; the server triggers a hop on the rising edge. */
+  jump: boolean;
 };
 
 /** Server -> all clients: a shot was fired (message type "shot"). For VFX only. */

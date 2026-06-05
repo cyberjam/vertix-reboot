@@ -22,6 +22,17 @@ export const PLAYER = {
 export const RESPAWN_MS = 2000;
 
 /**
+ * Jump (vertical hop). Top-down so jumping is an orthogonal vertical axis
+ * (`jumpY`, px above ground) that does NOT affect x/y movement or hit
+ * detection — purely a dodge-feel hop. Tuned for ~0.6s airtime, ~40px peak.
+ */
+export const JUMP = {
+  STRENGTH: 270, // initial upward velocity (px/s)
+  GRAVITY: 900, // downward acceleration (px/s^2)
+  COOLDOWN_MS: 250, // delay after landing before the next jump
+} as const;
+
+/**
  * Health pack pickups. Estimated from Vertix.io (map pickups, no passive
  * regen): instant +50 heal on contact, then the pack respawns after a cooldown.
  */

@@ -11,6 +11,8 @@ export class Player extends Schema {
   @type("string") weaponId = "machinegun";
   @type("number") x = 0;
   @type("number") y = 0;
+  /** Height above the ground (px) for the vertical jump hop; 0 = grounded. */
+  @type("number") jumpY = 0;
   @type("number") angle = 0;
   @type("number") hp: number = PLAYER.MAX_HP;
   @type("number") maxHp: number = PLAYER.MAX_HP;
