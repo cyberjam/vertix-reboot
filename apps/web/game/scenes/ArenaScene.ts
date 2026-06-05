@@ -3,9 +3,10 @@ import { Client, type Room } from "colyseus.js";
 import {
   WORLD,
   PLAYER,
-  MACHINEGUN,
   HEALTH_PACK,
   ARENA01,
+  getClass,
+  getWeapon,
   stepMovement,
   type InputMessage,
   type ShotMessage,
@@ -23,6 +24,8 @@ const SERVER_URL = process.env.NEXT_PUBLIC_GAME_SERVER_URL ?? "ws://localhost:25
 
 interface PlayerState {
   name: string;
+  classId: string;
+  weaponId: string;
   x: number;
   y: number;
   angle: number;
@@ -121,8 +124,12 @@ export class ArenaScene extends Phaser.Scene {
   private killFeed: KillFeedEntry[] = [];
   private healthPackMarkers: HealthPackMarker[] = [];
 
+  private selectedClass = "triggerman";
   private keys!: WASDKeys;
   private keyR!: Phaser.Input.Keyboard.Key;
+  private keyOne!: Phaser.Input.Keyboard.Key;
+  private keyTwo!: Phaser.Input.Keyboard.Key;
+  private keyQ!: Phaser.Input.Keyboard.Key;
   private aimGraphics!: Phaser.GameObjects.Graphics;
   private tracerGraphics!: Phaser.GameObjects.Graphics;
   private hudText!: Phaser.GameObjects.Text;
@@ -166,6 +173,9 @@ export class ArenaScene extends Phaser.Scene {
 
     this.keys = this.input.keyboard!.addKeys("W,A,S,D") as WASDKeys;
     this.keyR = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.R);
+    this.keyOne = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ONE);
+    this.keyTwo = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.TWO);
+    this.keyQ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
 
     this.buildHud();
 
@@ -234,7 +244,7 @@ export class ArenaScene extends Phaser.Scene {
     this.client = new Client(SERVER_URL);
     const name = `Guest${Math.floor(1000 + Math.random() * 9000)}`;
     try {
-      this.room = await this.client.joinOrCreate("arena", { name });
+      this.room = await this.client.joinOrCreate("arena", { name, classId: this.selectedClass });
     } catch (err) {
       console.error("[ArenaScene] failed to join room", err);
       this.hudText.setText(
@@ -307,6 +317,7 @@ export class ArenaScene extends Phaser.Scene {
       view.angle = p.angle;
       view.alive = p.alive;
       view.label.setText(p.name);
+      view.rect.setFillStyle(getClass(p.classId).color);
     });
 
     this.views.forEach((view, id) => {
@@ -344,9 +355,8 @@ export class ArenaScene extends Phaser.Scene {
 
   private createView(id: string): PlayerView {
     const isLocal = id === this.mySessionId;
-    const rect = this.add
-      .rectangle(0, 0, PLAYER_SIZE, PLAYER_SIZE, isLocal ? 0x4ea1ff : 0xff7a59)
-      .setDepth(2);
+    const rect = this.add.rectangle(0, 0, PLAYER_SIZE, PLAYER_SIZE, 0x888888).setDepth(2);
+    if (isLocal) rect.setStrokeStyle(3, 0xffffff);
     const muzzle = this.add.rectangle(0, 0, 14, 6, 0xffd166).setDepth(3);
     const label = this.add
       .text(0, 0, "", { fontFamily: "monospace", fontSize: "11px", color: "#cdd9e5" })
@@ -356,6 +366,17 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private handleLocalInput(me: PlayerState, deltaMs: number): void {
+    // Class selection (applies on next respawn) and weapon switching.
+    if (Phaser.Input.Keyboard.JustDown(this.keyOne)) {
+      this.selectedClass = "triggerman";
+      this.room!.send("selectClass", { classId: "triggerman" });
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.keyTwo)) {
+      this.selectedClass = "hunter";
+      this.room!.send("selectClass", { classId: "hunter" });
+    }
+    if (Phaser.Input.Keyboard.JustDown(this.keyQ)) this.room!.send("switchWeapon");
+
     let mx = 0;
     let my = 0;
     if (this.keys.A.isDown) mx -= 1;
@@ -468,12 +489,16 @@ export class ArenaScene extends Phaser.Scene {
       this.hudText.setText("Connecting…");
       return;
     }
-    const ammo = me.reloading ? "RELOADING" : `${me.ammo}/${MACHINEGUN.magSize}`;
+    const weapon = getWeapon(me.weaponId);
+    const className = getClass(me.classId).name;
+    const ammo = me.reloading ? "RELOADING" : `${me.ammo}/${weapon.magSize}`;
     const dead = me.alive ? "" : "   ☠ respawning…";
+    const pending =
+      this.selectedClass !== me.classId ? `  (next: ${getClass(this.selectedClass).name})` : "";
     this.hudText.setText(
-      `Triggerman   HP ${Math.max(0, Math.round(me.hp))}/${me.maxHp}   ` +
-        `Ammo ${ammo}   Score ${me.score}${dead}\n` +
-        "WASD move · mouse aim · hold click to fire · R reload",
+      `${className} [${weapon.name}]   HP ${Math.max(0, Math.round(me.hp))}/${me.maxHp}   ` +
+        `Ammo ${ammo}   Score ${me.score}${dead}${pending}\n` +
+        "WASD move · mouse aim · click fire · R reload · Q weapon · 1 Triggerman / 2 Hunter",
     );
   }
 

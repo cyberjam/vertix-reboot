@@ -40,4 +40,11 @@ export type KillMessage = {
 export type JoinOptions = {
   /** Display name shown on the scoreboard / above the player. */
   name?: string;
+  /** Initial class id (applied at spawn). */
+  classId?: string;
+};
+
+/** Client -> server: choose a class (takes effect on next respawn). */
+export type SelectClassMessage = {
+  classId: string;
 };
