@@ -1,0 +1,185 @@
+.root {
+  position: absolute;
+  inset: 0;
+  pointer-events: none;
+  font-family: "Segoe UI", system-ui, sans-serif;
+  color: #ffffff;
+  overflow: hidden;
+}
+
+/* --- top center: timer / objective --- */
+.match {
+  position: absolute;
+  top: 10px;
+  left: 50%;
+  transform: translateX(-50%);
+  text-align: center;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+.matchTimer {
+  font-size: 26px;
+  font-weight: 800;
+  letter-spacing: 2px;
+}
+.matchInfo {
+  font-size: 12px;
+  letter-spacing: 1px;
+  color: #9fb3c8;
+  text-transform: uppercase;
+}
+
+/* --- top right: leaderboard --- */
+.leaderboard {
+  position: absolute;
+  top: 10px;
+  right: 10px;
+  width: 230px;
+  background: rgba(14, 17, 24, 0.6);
+  border: 1px solid rgba(42, 51, 70, 0.8);
+  border-radius: 6px;
+  padding: 6px 8px;
+}
+.leaderHeader {
+  font-size: 11px;
+  letter-spacing: 2px;
+  color: #76b3e3;
+  text-align: center;
+  margin-bottom: 4px;
+}
+.row {
+  display: grid;
+  grid-template-columns: 16px 1fr auto auto;
+  gap: 6px;
+  font-size: 12px;
+  padding: 1px 2px;
+  border-radius: 3px;
+}
+.rowMe {
+  background: rgba(81, 81, 217, 0.35);
+}
+.rowRank {
+  color: #6b7a90;
+  text-align: right;
+}
+.rowName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.rowScore {
+  font-weight: 700;
+}
+.rowKd {
+  color: #9fb3c8;
+}
+
+/* --- top left: kill feed --- */
+.killfeed {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+}
+.killItem {
+  font-size: 12px;
+  background: rgba(14, 17, 24, 0.55);
+  border-radius: 3px;
+  padding: 2px 7px;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+.killArrow {
+  color: #ffd166;
+  margin: 0 5px;
+}
+.killVictim {
+  color: #d95151;
+}
+
+/* --- bottom left: health + ammo --- */
+.stats {
+  position: absolute;
+  left: 14px;
+  bottom: 14px;
+  width: 230px;
+}
+.statLabel {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  letter-spacing: 2px;
+  color: #9fb3c8;
+  text-shadow: 0 1px 2px rgba(0, 0, 0, 0.8);
+}
+.statValue {
+  color: #ffffff;
+  font-weight: 700;
+}
+.healthBar {
+  height: 14px;
+  margin: 3px 0 10px;
+  background: rgba(14, 17, 24, 0.7);
+  border: 1px solid rgba(42, 51, 70, 0.9);
+  border-radius: 4px;
+  overflow: hidden;
+}
+.healthFill {
+  height: 100%;
+  transition: width 0.12s linear, background 0.2s;
+}
+.ammo {
+  font-size: 30px;
+  font-weight: 800;
+  text-shadow: 0 1px 3px rgba(0, 0, 0, 0.8);
+}
+.ammoReloading {
+  color: #ffd166;
+  font-size: 18px;
+  letter-spacing: 2px;
+}
+
+/* --- bottom center: weapon action bar --- */
+.actionBar {
+  position: absolute;
+  bottom: 14px;
+  left: 50%;
+  transform: translateX(-50%);
+  display: flex;
+  gap: 8px;
+}
+.slot {
+  min-width: 92px;
+  background: rgba(14, 17, 24, 0.6);
+  border: 2px solid rgba(42, 51, 70, 0.9);
+  border-radius: 6px;
+  padding: 5px 8px;
+  text-align: center;
+}
+.slotActive {
+  border-color: #5151d9;
+  box-shadow: 0 0 0 1px #5151d9 inset;
+}
+.slotName {
+  font-size: 12px;
+  font-weight: 700;
+  white-space: nowrap;
+}
+.slotAmmo {
+  font-size: 11px;
+  color: #9fb3c8;
+  margin-top: 2px;
+}
+
+/* --- center: dead state --- */
+.dead {
+  position: absolute;
+  top: 42%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  text-align: center;
+  font-size: 22px;
+  font-weight: 700;
+  color: #d95151;
+  text-shadow: 0 2px 6px rgba(0, 0, 0, 0.9);
+}

@@ -7,12 +7,10 @@ import {
   JUMP,
   ARENA01,
   getClass,
-  getWeapon,
   stepMovement,
   stepJump,
   type InputMessage,
   type ShotMessage,
-  type KillMessage,
 } from "@vertix/shared";
 
 const PLAYER_SIZE = PLAYER.RADIUS * 2;
@@ -20,8 +18,6 @@ const AIM_LINE_LENGTH = 220;
 const RETICLE_RADIUS = 6;
 const INTERP = 0.25; // interpolation factor for remote players
 const TRACER_MS = 70;
-const KILLFEED_MS = 4000;
-const SCOREBOARD_ROWS = 8;
 
 interface PlayerState {
   name: string;
@@ -95,12 +91,6 @@ interface Tracer {
   until: number;
 }
 
-interface KillFeedEntry {
-  killer: string;
-  victim: string;
-  until: number;
-}
-
 type WASDKeys = {
   W: Phaser.Input.Keyboard.Key;
   A: Phaser.Input.Keyboard.Key;
@@ -127,7 +117,6 @@ export class ArenaScene extends Phaser.Scene {
   private localAim = 0;
   private seq = 0;
   private tracers: Tracer[] = [];
-  private killFeed: KillFeedEntry[] = [];
   private healthPackMarkers: HealthPackMarker[] = [];
 
   private selectedClass = "triggerman";
@@ -144,10 +133,6 @@ export class ArenaScene extends Phaser.Scene {
   private keyQ!: Phaser.Input.Keyboard.Key;
   private aimGraphics!: Phaser.GameObjects.Graphics;
   private tracerGraphics!: Phaser.GameObjects.Graphics;
-  private hudText!: Phaser.GameObjects.Text;
-  private matchText!: Phaser.GameObjects.Text;
-  private scoreboardText!: Phaser.GameObjects.Text;
-  private killFeedText!: Phaser.GameObjects.Text;
   private bannerText!: Phaser.GameObjects.Text;
   private damageFlash!: Phaser.GameObjects.Rectangle;
   private prevMyHp = 0;
@@ -228,31 +213,9 @@ export class ArenaScene extends Phaser.Scene {
   private buildHud(): void {
     const width = this.scale.width;
     const height = this.scale.height;
-    const mono = (size: number) => ({
-      fontFamily: "monospace",
-      fontSize: `${size}px`,
-      color: "#9fb3c8",
-    });
 
-    this.hudText = this.add.text(12, 12, "Connecting…", mono(15)).setScrollFactor(0).setDepth(10);
-
-    this.matchText = this.add
-      .text(width / 2, 12, "", { ...mono(15), color: "#e6e6e6", align: "center" })
-      .setOrigin(0.5, 0)
-      .setScrollFactor(0)
-      .setDepth(10);
-
-    this.scoreboardText = this.add
-      .text(width - 12, 12, "", { ...mono(13), color: "#cdd9e5", align: "left" })
-      .setOrigin(1, 0)
-      .setScrollFactor(0)
-      .setDepth(10);
-
-    this.killFeedText = this.add
-      .text(12, 64, "", { ...mono(13), color: "#ffd166", align: "left" })
-      .setScrollFactor(0)
-      .setDepth(10);
-
+    // Round-over banner stays in Phaser; the live HUD readouts (HP/ammo/score/
+    // timer/scoreboard/kill feed) are rendered as a React DOM overlay.
     this.bannerText = this.add
       .text(width / 2, height / 2, "", {
         fontFamily: "monospace",
@@ -275,11 +238,12 @@ export class ArenaScene extends Phaser.Scene {
   private registerRoomHandlers(): void {
     const room = this.room;
     if (!room) return;
-    // Seed the selected class from the player's current server state so the HUD
-    // "next class" hint stays accurate after joining via the menu.
+    // Seed the selected class from the player's current server state.
     const me = (room.state as { players: StatePlayers }).players.get(this.mySessionId);
     if (me) this.selectedClass = me.classId;
 
+    // "shot" drives the tracer/muzzle/hitmarker VFX (kept in Phaser). The kill
+    // feed is rendered by the React HUD, which subscribes to "kill" itself.
     room.onMessage("shot", (msg: ShotMessage) => {
       this.tracers.push({
         sx: msg.sx,
@@ -295,20 +259,10 @@ export class ArenaScene extends Phaser.Scene {
         this.cameras.main.shake(60, 0.004);
       }
     });
-    room.onMessage("kill", (msg: KillMessage) => {
-      this.killFeed.push({
-        killer: msg.killerName,
-        victim: msg.victimName,
-        until: this.time.now + KILLFEED_MS,
-      });
-      if (this.killFeed.length > 6) this.killFeed.shift();
-    });
-    room.onLeave(() => this.hudText.setText("Disconnected from server"));
   }
 
   update(_time: number, deltaMs: number): void {
     this.drawTracers();
-    this.drawKillFeed();
     if (!this.room) return;
 
     const state = this.room.state as {
@@ -326,9 +280,7 @@ export class ArenaScene extends Phaser.Scene {
     }
     this.renderViews();
     if (me) this.drawAim();
-    this.updateHud(me);
-    this.updateScoreboard(state.players);
-    this.updateMatchUi(state.match);
+    this.updateBanner(state.match);
   }
 
   private syncViews(players: StatePlayers): void {
@@ -642,54 +594,7 @@ export class ArenaScene extends Phaser.Scene {
     }
   }
 
-  private drawKillFeed(): void {
-    const now = this.time.now;
-    this.killFeed = this.killFeed.filter((k) => k.until > now);
-    this.killFeedText.setText(this.killFeed.map((k) => `${k.killer} ▸ ${k.victim}`).join("\n"));
-  }
-
-  private updateHud(me: PlayerState | undefined): void {
-    if (!me) {
-      this.hudText.setText("Connecting…");
-      return;
-    }
-    const weapon = getWeapon(me.weaponId);
-    const className = getClass(me.classId).name;
-    const ammo = me.reloading ? "RELOADING" : `${me.ammo}/${weapon.magSize}`;
-    const dead = me.alive ? "" : "   ☠ respawning…";
-    const pending =
-      this.selectedClass !== me.classId ? `  (next: ${getClass(this.selectedClass).name})` : "";
-    this.hudText.setText(
-      `${className} [${weapon.name}]   HP ${Math.max(0, Math.round(me.hp))}/${me.maxHp}   ` +
-        `Ammo ${ammo}   Score ${me.score}${dead}${pending}\n` +
-        "WASD move · Space jump · mouse aim · click fire · R reload · Q weapon · 1/2/3 class",
-    );
-  }
-
-  private updateScoreboard(players: StatePlayers): void {
-    const rows: { name: string; score: number; kills: number; deaths: number; id: string }[] = [];
-    players.forEach((p, id) => {
-      rows.push({ name: p.name, score: p.score, kills: p.kills, deaths: p.deaths, id });
-    });
-    rows.sort((a, b) => b.score - a.score || b.kills - a.kills);
-
-    const lines = ["── SCOREBOARD ──"];
-    rows.slice(0, SCOREBOARD_ROWS).forEach((r, i) => {
-      const marker = r.id === this.mySessionId ? "▸" : " ";
-      const rank = `${i + 1}`.padStart(2);
-      const name = r.name.padEnd(12).slice(0, 12);
-      const score = `${r.score}`.padStart(5);
-      lines.push(`${marker}${rank} ${name} ${score}  ${r.kills}/${r.deaths}`);
-    });
-    this.scoreboardText.setText(lines.join("\n"));
-  }
-
-  private updateMatchUi(match: MatchStateView): void {
-    const seconds = Math.max(0, Math.ceil(match.timeRemainingMs / 1000));
-    const mm = Math.floor(seconds / 60);
-    const ss = `${seconds % 60}`.padStart(2, "0");
-    this.matchText.setText(`FFA   ${mm}:${ss}   first to ${match.targetScore}`);
-
+  private updateBanner(match: MatchStateView): void {
     if (match.phase === "ended") {
       const winner = match.winnerName.length > 0 ? match.winnerName : "—";
       this.bannerText.setText(`ROUND OVER\nWinner: ${winner}\nnext round starting…`).setVisible(true);

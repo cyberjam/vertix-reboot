@@ -3,6 +3,7 @@
 import { useEffect, useRef } from "react";
 import type { Game } from "phaser";
 import type { Room } from "colyseus.js";
+import Hud from "@/components/Hud";
 
 const GAME_WIDTH = 960;
 const GAME_HEIGHT = 540;
@@ -55,8 +56,15 @@ export default function PhaserGame({ room, sessionId }: PhaserGameProps) {
 
   return (
     <div
-      ref={containerRef}
-      style={{ width: GAME_WIDTH, height: GAME_HEIGHT, border: "1px solid #1c2330" }}
-    />
+      style={{
+        position: "relative",
+        width: GAME_WIDTH,
+        height: GAME_HEIGHT,
+        border: "1px solid #1c2330",
+      }}
+    >
+      <div ref={containerRef} style={{ width: GAME_WIDTH, height: GAME_HEIGHT }} />
+      <Hud room={room} sessionId={sessionId} />
+    </div>
   );
 }
