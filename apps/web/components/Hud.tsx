@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from "react";
 import type { Room } from "colyseus.js";
 import { getClass, getWeapon, type KillMessage } from "@vertix/shared";
+import Minimap from "./Minimap";
 import styles from "./Hud.module.css";
 
 const POLL_MS = 90; // HUD refresh throttle (state changes ~20Hz on the wire)
@@ -245,6 +246,9 @@ export default function Hud({ room, sessionId }: { room: Room; sessionId: string
           })}
         </div>
       ) : null}
+
+      {/* minimap (bottom-right) */}
+      <Minimap room={room} sessionId={sessionId} />
 
       {/* dead state (hidden while a full-screen overlay is showing) */}
       {me && !me.alive && !ended && !showBoard ? (
