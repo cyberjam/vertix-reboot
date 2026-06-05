@@ -95,7 +95,9 @@ export default function MainMenu() {
         </button>
 
         {error ? <p className={styles.error}>{error}</p> : null}
-        <p className={styles.hint}>WASD move · mouse aim · click fire · R reload · Q weapon</p>
+        <p className={styles.hint}>
+          WASD move · Space jump · mouse aim · click fire · R reload · Q weapon
+        </p>
       </div>
     </div>
   );

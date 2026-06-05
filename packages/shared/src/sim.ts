@@ -1,5 +1,5 @@
 import type { RectWall } from "./maps";
-import { PLAYER, WORLD } from "./gameplay";
+import { PLAYER, WORLD, JUMP } from "./gameplay";
 import { clamp } from "./math";
 
 /** Maximum movement delta the server will honor per command (anti-speedhack). */
@@ -65,4 +65,31 @@ export function stepMovement(
   }
 
   return { x: nx, y: ny };
+}
+
+export interface JumpStep {
+  /** Height above the ground (px); 0 means grounded. */
+  jumpY: number;
+  /** Vertical velocity (px/s); positive is upward. */
+  jumpVel: number;
+  /** True once the hop has landed (clamped back to the ground this step). */
+  grounded: boolean;
+}
+
+/**
+ * Deterministic vertical-hop integration, shared by the client (local prediction)
+ * and the server (replicated `jumpY`). Independent of x/y movement and hit
+ * detection — gravity pulls `jumpY` back to the ground each step.
+ */
+export function stepJump(jumpY: number, jumpVel: number, dtMs: number): JumpStep {
+  const dt = clamp(dtMs, 0, MAX_INPUT_DT_MS) / 1000;
+  let vel = jumpVel - JUMP.GRAVITY * dt;
+  let y = jumpY + vel * dt;
+  let grounded = false;
+  if (y <= 0) {
+    y = 0;
+    vel = 0;
+    grounded = true;
+  }
+  return { jumpY: y, jumpVel: vel, grounded };
 }

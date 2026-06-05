@@ -4,10 +4,12 @@ import {
   WORLD,
   PLAYER,
   HEALTH_PACK,
+  JUMP,
   ARENA01,
   getClass,
   getWeapon,
   stepMovement,
+  stepJump,
   type InputMessage,
   type ShotMessage,
   type KillMessage,
@@ -27,6 +29,7 @@ interface PlayerState {
   weaponId: string;
   x: number;
   y: number;
+  jumpY: number;
   angle: number;
   hp: number;
   maxHp: number;
@@ -70,10 +73,13 @@ interface HealthPackMarker {
 
 interface PlayerView {
   rect: Phaser.GameObjects.Rectangle;
+  shadow: Phaser.GameObjects.Ellipse;
   muzzle: Phaser.GameObjects.Rectangle;
   label: Phaser.GameObjects.Text;
   targetX: number;
   targetY: number;
+  jumpY: number;
+  targetJumpY: number;
   angle: number;
   alive: boolean;
   prevAlive: boolean;
@@ -125,7 +131,12 @@ export class ArenaScene extends Phaser.Scene {
   private healthPackMarkers: HealthPackMarker[] = [];
 
   private selectedClass = "triggerman";
+  private localJumpY = 0;
+  private localJumpVel = 0;
+  private localJumpReadyAt = 0;
+  private cameraAnchor!: Phaser.GameObjects.Rectangle;
   private keys!: WASDKeys;
+  private keySpace!: Phaser.Input.Keyboard.Key;
   private keyR!: Phaser.Input.Keyboard.Key;
   private keyOne!: Phaser.Input.Keyboard.Key;
   private keyTwo!: Phaser.Input.Keyboard.Key;
@@ -181,7 +192,15 @@ export class ArenaScene extends Phaser.Scene {
     camera.setBackgroundColor("#0b0e14");
     camera.centerOn(WORLD.WIDTH / 2, WORLD.HEIGHT / 2);
 
+    // Camera follows an invisible ground anchor so jumping (vertical offset)
+    // moves the body sprite without bobbing the whole view.
+    this.cameraAnchor = this.add
+      .rectangle(WORLD.WIDTH / 2, WORLD.HEIGHT / 2, 1, 1, 0x000000, 0)
+      .setDepth(-2);
+    camera.startFollow(this.cameraAnchor, true, 0.18, 0.18);
+
     this.keys = this.input.keyboard!.addKeys("W,A,S,D") as WASDKeys;
+    this.keySpace = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.SPACE);
     this.keyR = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.R);
     this.keyOne = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.ONE);
     this.keyTwo = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.TWO);
@@ -322,13 +341,16 @@ export class ArenaScene extends Phaser.Scene {
         view = this.createView(id);
         this.views.set(id, view);
         view.rect.setPosition(p.x, p.y);
+        view.shadow.setPosition(p.x, p.y);
+        view.jumpY = p.jumpY;
         if (id === this.mySessionId) {
           this.predicted.set(p.x, p.y);
-          this.cameras.main.startFollow(view.rect, true, 0.18, 0.18);
+          this.cameraAnchor.setPosition(p.x, p.y);
         }
       }
       view.targetX = p.x;
       view.targetY = p.y;
+      view.targetJumpY = p.jumpY;
       view.angle = p.angle;
       view.alive = p.alive;
       view.label.setText(p.name);
@@ -339,6 +361,7 @@ export class ArenaScene extends Phaser.Scene {
     this.views.forEach((view, id) => {
       if (!seen.has(id)) {
         view.rect.destroy();
+        view.shadow.destroy();
         view.muzzle.destroy();
         view.label.destroy();
         this.views.delete(id);
@@ -371,6 +394,9 @@ export class ArenaScene extends Phaser.Scene {
 
   private createView(id: string): PlayerView {
     const isLocal = id === this.mySessionId;
+    const shadow = this.add
+      .ellipse(0, 0, PLAYER_SIZE * 0.9, PLAYER_SIZE * 0.5, 0x000000, 0.35)
+      .setDepth(1);
     const rect = this.add.rectangle(0, 0, PLAYER_SIZE, PLAYER_SIZE, 0x888888).setDepth(2);
     if (isLocal) rect.setStrokeStyle(3, 0xffffff);
     const muzzle = this.add.rectangle(0, 0, 14, 6, 0xffd166).setDepth(3);
@@ -380,10 +406,13 @@ export class ArenaScene extends Phaser.Scene {
       .setDepth(4);
     return {
       rect,
+      shadow,
       muzzle,
       label,
       targetX: 0,
       targetY: 0,
+      jumpY: 0,
+      targetJumpY: 0,
       angle: 0,
       alive: true,
       prevAlive: true,
@@ -430,6 +459,7 @@ export class ArenaScene extends Phaser.Scene {
     );
 
     const firing = pointer.leftButtonDown();
+    const jumpHeld = this.keySpace.isDown;
     this.seq += 1;
     const cmd: InputMessage = {
       seq: this.seq,
@@ -438,6 +468,7 @@ export class ArenaScene extends Phaser.Scene {
       moveY: my,
       aim: this.localAim,
       firing,
+      jump: jumpHeld,
     };
     this.room!.send("input", cmd);
     if (Phaser.Input.Keyboard.JustDown(this.keyR)) this.room!.send("reload");
@@ -453,24 +484,64 @@ export class ArenaScene extends Phaser.Scene {
         y = next.y;
       }
       this.predicted.set(x, y);
+      this.predictJump(deltaMs);
     } else {
       this.pending.length = 0;
       this.predicted.set(me.x, me.y);
+      this.localJumpY = 0;
+      this.localJumpVel = 0;
     }
+  }
+
+  /** Local prediction of the jump arc (matches the server's stepJump). */
+  private predictJump(deltaMs: number): void {
+    if (
+      Phaser.Input.Keyboard.JustDown(this.keySpace) &&
+      this.localJumpY <= 0 &&
+      this.time.now >= this.localJumpReadyAt
+    ) {
+      this.localJumpVel = JUMP.STRENGTH;
+    }
+    const wasAirborne = this.localJumpY > 0;
+    const step = stepJump(this.localJumpY, this.localJumpVel, deltaMs);
+    this.localJumpY = step.jumpY;
+    this.localJumpVel = step.jumpVel;
+    if (wasAirborne && step.grounded) this.localJumpReadyAt = this.time.now + JUMP.COOLDOWN_MS;
   }
 
   private renderViews(): void {
     this.views.forEach((view, id) => {
+      // Resolve ground position (gx,gy), jump height (jy) and aim angle.
+      let gx: number;
+      let gy: number;
+      let jy: number;
+      let angle: number;
       if (id === this.mySessionId) {
-        view.rect.setPosition(this.predicted.x, this.predicted.y);
-        view.rect.setRotation(this.localAim);
-        this.positionMuzzle(view, this.localAim);
+        gx = this.predicted.x;
+        gy = this.predicted.y;
+        jy = this.localJumpY;
+        angle = this.localAim;
+        this.cameraAnchor.setPosition(gx, gy);
       } else {
-        view.rect.x = Phaser.Math.Linear(view.rect.x, view.targetX, INTERP);
-        view.rect.y = Phaser.Math.Linear(view.rect.y, view.targetY, INTERP);
-        view.rect.setRotation(view.angle);
-        this.positionMuzzle(view, view.angle);
+        gx = Phaser.Math.Linear(view.shadow.x, view.targetX, INTERP);
+        gy = Phaser.Math.Linear(view.shadow.y, view.targetY, INTERP);
+        view.jumpY = Phaser.Math.Linear(view.jumpY, view.targetJumpY, INTERP);
+        jy = view.jumpY;
+        angle = view.angle;
       }
+
+      // Ground shadow stays on the floor and shrinks/fades as the player rises.
+      const lift = Phaser.Math.Clamp(jy / 60, 0, 1);
+      view.shadow.setPosition(gx, gy);
+      view.shadow.setScale(1 - lift * 0.35);
+      view.shadow.setAlpha((view.alive ? 0.35 : 0.12) * (1 - lift * 0.5));
+      view.shadow.setVisible(view.alive);
+
+      // Body is lifted by the jump height.
+      view.rect.setPosition(gx, gy - jy);
+      view.rect.setRotation(angle);
+      this.positionMuzzle(view, angle);
+
       view.label.setPosition(view.rect.x, view.rect.y - PLAYER.RADIUS - 6);
       view.rect.setAlpha(view.alive ? 1 : 0.25);
       view.muzzle.setVisible(view.alive);
@@ -478,7 +549,7 @@ export class ArenaScene extends Phaser.Scene {
 
       // Death burst when a player dies.
       if (view.prevAlive && !view.alive) {
-        this.spawnDeathRing(view.rect.x, view.rect.y, view.color);
+        this.spawnDeathRing(gx, gy, view.color);
       }
       view.prevAlive = view.alive;
     });
@@ -549,12 +620,14 @@ export class ArenaScene extends Phaser.Scene {
   }
 
   private drawAim(): void {
-    const endX = this.predicted.x + Math.cos(this.localAim) * AIM_LINE_LENGTH;
-    const endY = this.predicted.y + Math.sin(this.localAim) * AIM_LINE_LENGTH;
+    const originX = this.predicted.x;
+    const originY = this.predicted.y - this.localJumpY;
+    const endX = originX + Math.cos(this.localAim) * AIM_LINE_LENGTH;
+    const endY = originY + Math.sin(this.localAim) * AIM_LINE_LENGTH;
 
     this.aimGraphics.clear();
     this.aimGraphics.lineStyle(2, 0x4ea1ff, 0.6);
-    this.aimGraphics.lineBetween(this.predicted.x, this.predicted.y, endX, endY);
+    this.aimGraphics.lineBetween(originX, originY, endX, endY);
     this.aimGraphics.lineStyle(1.5, 0xffffff, 0.85);
     this.aimGraphics.strokeCircle(this.aimWorld.x, this.aimWorld.y, RETICLE_RADIUS);
   }
@@ -589,7 +662,7 @@ export class ArenaScene extends Phaser.Scene {
     this.hudText.setText(
       `${className} [${weapon.name}]   HP ${Math.max(0, Math.round(me.hp))}/${me.maxHp}   ` +
         `Ammo ${ammo}   Score ${me.score}${dead}${pending}\n` +
-        "WASD move · mouse aim · click fire · R reload · Q weapon · 1 Triggerman / 2 Hunter / 3 Vince",
+        "WASD move · Space jump · mouse aim · click fire · R reload · Q weapon · 1/2/3 class",
     );
   }
 

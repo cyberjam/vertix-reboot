@@ -7,8 +7,10 @@ import {
   FFA,
   HEALTH_PACK,
   MAX_INPUT_DT_MS,
+  JUMP,
   clamp,
   stepMovement,
+  stepJump,
   rayCircleDistance,
   rayAabbDistance,
   getMap,
@@ -27,7 +29,7 @@ import {
 } from "@vertix/shared";
 import { GameState, Player, HealthPack } from "../schema/GameState";
 
-type LatestInput = { aim: number; firing: boolean };
+type LatestInput = { aim: number; firing: boolean; jump: boolean };
 type WeaponRuntime = { ammo: number; nextFireAt: number; reloadEndsAt: number; reloading: boolean };
 
 const MAX_CMDS_PER_TICK = 10;
@@ -54,6 +56,9 @@ export class ArenaRoom extends Room<GameState> {
   private readonly queues = new Map<string, InputMessage[]>();
   private readonly weapons = new Map<string, Map<string, WeaponRuntime>>();
   private readonly prevFiring = new Map<string, boolean>();
+  private readonly jumpVel = new Map<string, number>();
+  private readonly prevJump = new Map<string, boolean>();
+  private readonly jumpReadyAt = new Map<string, number>();
   private readonly respawnAt = new Map<string, number>();
   private readonly pendingClass = new Map<string, string>();
   private readonly reloadQueued = new Set<string>();
@@ -96,12 +101,14 @@ export class ArenaRoom extends Room<GameState> {
         moveY: clamp(Number(msg.moveY) || 0, -1, 1),
         aim: Number.isFinite(msg.aim) ? msg.aim : latest.aim,
         firing: Boolean(msg.firing),
+        jump: Boolean(msg.jump),
       };
       queue.push(cmd);
       if (queue.length > MAX_QUEUE) queue.shift();
 
       latest.aim = cmd.aim;
       latest.firing = cmd.firing;
+      latest.jump = cmd.jump;
     });
 
     this.onMessage("reload", (client) => {
@@ -128,9 +135,12 @@ export class ArenaRoom extends Room<GameState> {
     player.name = this.sanitizeName(options?.name, id);
     const classId = options?.classId && CLASSES[options.classId] ? options.classId : DEFAULT_CLASS;
 
-    this.latest.set(id, { aim: 0, firing: false });
+    this.latest.set(id, { aim: 0, firing: false, jump: false });
     this.queues.set(id, []);
     this.prevFiring.set(id, false);
+    this.jumpVel.set(id, 0);
+    this.prevJump.set(id, false);
+    this.jumpReadyAt.set(id, 0);
     this.respawnAt.set(id, 0);
     this.pendingClass.set(id, classId);
 
@@ -149,6 +159,9 @@ export class ArenaRoom extends Room<GameState> {
     this.queues.delete(id);
     this.weapons.delete(id);
     this.prevFiring.delete(id);
+    this.jumpVel.delete(id);
+    this.prevJump.delete(id);
+    this.jumpReadyAt.delete(id);
     this.respawnAt.delete(id);
     this.pendingClass.delete(id);
     this.reloadQueued.delete(id);
@@ -175,12 +188,17 @@ export class ArenaRoom extends Room<GameState> {
         const tail = queue[queue.length - 1];
         if (tail) player.lastSeq = tail.seq;
         queue.length = 0;
+        if (player.jumpY !== 0) {
+          player.jumpY = 0;
+          this.jumpVel.set(id, 0);
+        }
         if (now >= (this.respawnAt.get(id) ?? 0)) this.respawn(id, player);
         return;
       }
 
       this.consumeMovement(player, queue);
       player.angle = latest.aim;
+      this.applyJump(id, player, latest.jump, now, dt);
 
       if (match.phase === "playing") {
         const weapon = getWeapon(player.weaponId);
@@ -213,6 +231,27 @@ export class ArenaRoom extends Room<GameState> {
       player.lastSeq = cmd.seq;
       processed += 1;
     }
+  }
+
+  /**
+   * Authoritative vertical hop. Independent of x/y movement and hit detection:
+   * starts on the rising edge of the jump key when grounded and off cooldown,
+   * then integrates the arc each tick and replicates `jumpY`.
+   */
+  private applyJump(id: string, player: Player, jump: boolean, now: number, dt: number): void {
+    const prev = this.prevJump.get(id) ?? false;
+    let vel = this.jumpVel.get(id) ?? 0;
+    const wasAirborne = player.jumpY > 0;
+
+    if (jump && !prev && player.jumpY <= 0 && now >= (this.jumpReadyAt.get(id) ?? 0)) {
+      vel = JUMP.STRENGTH;
+    }
+
+    const step = stepJump(player.jumpY, vel, dt);
+    player.jumpY = step.jumpY;
+    this.jumpVel.set(id, step.jumpVel);
+    if (wasAirborne && step.grounded) this.jumpReadyAt.set(id, now + JUMP.COOLDOWN_MS);
+    this.prevJump.set(id, jump);
   }
 
   private applyReload(id: string, weapon: WeaponDef, runtime: WeaponRuntime, now: number): void {
@@ -409,8 +448,12 @@ export class ArenaRoom extends Room<GameState> {
     const spawn = this.pickSpawn();
     player.x = spawn.x;
     player.y = spawn.y;
+    player.jumpY = 0;
     player.alive = true;
     this.respawnAt.set(id, 0);
+    this.jumpVel.set(id, 0);
+    this.prevJump.set(id, false);
+    this.jumpReadyAt.set(id, 0);
     // Class selection takes effect on respawn.
     const classId = this.pendingClass.get(id) ?? player.classId;
     this.equipClass(id, player, classId);
