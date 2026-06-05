@@ -1,4 +1,4 @@
-import { Schema, type, MapSchema } from "@colyseus/schema";
+import { Schema, type, MapSchema, ArraySchema } from "@colyseus/schema";
 import { PLAYER, MACHINEGUN, FFA } from "@vertix/shared";
 
 /**
@@ -33,7 +33,15 @@ export class MatchState extends Schema {
   @type("string") winnerName = "";
 }
 
+/** A health pickup at a fixed map location; toggles active on pickup/respawn. */
+export class HealthPack extends Schema {
+  @type("number") x = 0;
+  @type("number") y = 0;
+  @type("boolean") active = true;
+}
+
 export class GameState extends Schema {
   @type({ map: Player }) players = new MapSchema<Player>();
   @type(MatchState) match = new MatchState();
+  @type([HealthPack]) healthPacks = new ArraySchema<HealthPack>();
 }

@@ -6,6 +6,7 @@ import {
   MACHINEGUN,
   RESPAWN_MS,
   FFA,
+  HEALTH_PACK,
   MAX_INPUT_DT_MS,
   clamp,
   stepMovement,
@@ -19,7 +20,7 @@ import {
   type KillMessage,
   type JoinOptions,
 } from "@vertix/shared";
-import { GameState, Player } from "../schema/GameState";
+import { GameState, Player, HealthPack } from "../schema/GameState";
 
 /** Latest aim/fire intent (responsive), separate from queued movement. */
 type LatestInput = { aim: number; firing: boolean };
@@ -51,6 +52,7 @@ export class ArenaRoom extends Room<GameState> {
   private readonly timers = new Map<string, Timers>();
   private readonly reloadQueued = new Set<string>();
   private readonly map: MapDef = getMap(process.env.MAP_ID ?? "arena01");
+  private readonly packRespawnAt: number[] = [];
   private elapsed = 0;
   private matchEndAt = 0;
 
@@ -58,11 +60,22 @@ export class ArenaRoom extends Room<GameState> {
   private readonly targetScore = envNumber("FFA_TARGET_SCORE", FFA.TARGET_SCORE);
   private readonly durationMs = envNumber("FFA_DURATION_MS", FFA.DURATION_MS);
   private readonly endScreenMs = envNumber("FFA_END_SCREEN_MS", FFA.END_SCREEN_MS);
+  private readonly packRespawnMs = envNumber("HP_RESPAWN_MS", HEALTH_PACK.RESPAWN_MS);
 
   onCreate(): void {
     this.setState(new GameState());
     this.state.match.targetScore = this.targetScore;
     this.state.match.timeRemainingMs = this.durationMs;
+
+    for (const location of this.map.healthPacks) {
+      const pack = new HealthPack();
+      pack.x = location.x;
+      pack.y = location.y;
+      pack.active = true;
+      this.state.healthPacks.push(pack);
+      this.packRespawnAt.push(0);
+    }
+
     this.setPatchRate(NET.PATCHRATE_MS);
 
     this.onMessage<InputMessage>("input", (client, msg) => {
@@ -150,8 +163,36 @@ export class ArenaRoom extends Room<GameState> {
       }
     });
 
+    this.updateHealthPacks(now, match.phase === "playing");
+
     if (match.phase === "playing" && match.timeRemainingMs <= 0) {
       this.endMatch();
+    }
+  }
+
+  private updateHealthPacks(now: number, allowPickup: boolean): void {
+    const packs = this.state.healthPacks;
+    const pickupRadius = PLAYER.RADIUS + HEALTH_PACK.RADIUS;
+
+    for (let i = 0; i < packs.length; i++) {
+      const pack = packs[i];
+      if (!pack) continue;
+
+      if (!pack.active) {
+        if (now >= (this.packRespawnAt[i] ?? 0)) pack.active = true;
+        continue;
+      }
+      if (!allowPickup) continue;
+
+      this.state.players.forEach((player) => {
+        if (!pack.active || !player.alive || player.hp >= player.maxHp) return;
+        const dist = Math.hypot(player.x - pack.x, player.y - pack.y);
+        if (dist <= pickupRadius) {
+          player.hp = Math.min(player.maxHp, player.hp + HEALTH_PACK.HEAL);
+          pack.active = false;
+          this.packRespawnAt[i] = now + this.packRespawnMs;
+        }
+      });
     }
   }
 
