@@ -56,36 +56,39 @@ export interface WeaponDef {
   auto: boolean;
 }
 
+// Calibrated values — see docs/design/05-weapon-balance.md for the full
+// rationale (TTK model, role differentiation, range tiers).
+
 const MACHINEGUN_DEF: WeaponDef = {
   id: "machinegun",
   name: "Machine Gun",
-  damage: 25,
-  magSize: 24,
-  fireRateMs: 90,
+  damage: 25, // confirmed: 4 shots to kill 100 HP
+  magSize: 24, // confirmed
+  fireRateMs: 90, // ~11.1 rps -> TTK(100hp) = 3 * 90 = 270ms
   reloadMs: 1500,
-  rangePx: 700,
+  rangePx: 750, // versatile mid-range; covers most arena lanes
   auto: true,
 };
 
 const SNIPER_DEF: WeaponDef = {
   id: "sniper",
   name: "Sniper",
-  damage: 100,
+  damage: 100, // confirmed: one-shots any <=100 HP class
   magSize: 5,
-  fireRateMs: 900,
-  reloadMs: 1800,
-  rangePx: 1400,
-  auto: false,
+  fireRateMs: 1100, // slow single fire; missing is heavily punished
+  reloadMs: 2200,
+  rangePx: 1700, // dominates long sightlines (near cross-map)
+  auto: false, // semi-auto, fully accurate
 };
 
 const MACHINE_PISTOL_DEF: WeaponDef = {
   id: "machine_pistol",
   name: "Machine Pistol",
-  damage: 12,
-  magSize: 5,
-  fireRateMs: 70,
-  reloadMs: 1100,
-  rangePx: 600,
+  damage: 12, // confirmed
+  magSize: 5, // confirmed; one mag = 60 dmg, cannot kill a full 100 HP target
+  fireRateMs: 60, // ~16.7 rps, fast close-range backup
+  reloadMs: 1000,
+  rangePx: 520, // short range; encourages Hunter to lead with the sniper
   auto: true,
 };
 
