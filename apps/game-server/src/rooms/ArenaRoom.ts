@@ -73,6 +73,8 @@ export class ArenaRoom extends Room<GameState> {
   private readonly packRespawnMs = envNumber("HP_RESPAWN_MS", HEALTH_PACK.RESPAWN_MS);
 
   onCreate(): void {
+    this.maxClients = 8;
+    this.setMetadata({ mode: "ffa", map: this.map.id });
     this.setState(new GameState());
     this.state.match.targetScore = this.targetScore;
     this.state.match.timeRemainingMs = this.durationMs;

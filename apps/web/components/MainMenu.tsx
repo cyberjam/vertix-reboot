@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { CLASS_IDS, DEFAULT_CLASS, getClass, getWeapon } from "@vertix/shared";
 import { useNet } from "@/game/net/NetProvider";
+import ServerBrowser from "./ServerBrowser";
 import styles from "./MainMenu.module.css";
 
 const NAME_KEY = "vertix.playerName";
@@ -22,6 +23,7 @@ export default function MainMenu() {
   const { connect, status, error } = useNet();
   const [name, setName] = useState("");
   const [classId, setClassId] = useState<string>(DEFAULT_CLASS);
+  const [showBrowser, setShowBrowser] = useState(false);
 
   // Restore persisted choices on mount (client-only to avoid SSR mismatch).
   useEffect(() => {
@@ -95,10 +97,17 @@ export default function MainMenu() {
         </button>
 
         {error ? <p className={styles.error}>{error}</p> : null}
-        <p className={styles.hint}>
-          WASD move · Space jump · mouse aim · click fire · R reload · Q weapon
-        </p>
+
+        <button
+          className={styles.browserBtn}
+          onClick={() => setShowBrowser(true)}
+          disabled={connecting}
+        >
+          Browse Servers
+        </button>
       </div>
+
+      {showBrowser && <ServerBrowser onClose={() => setShowBrowser(false)} />}
     </div>
   );
 }
