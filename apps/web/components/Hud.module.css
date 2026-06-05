@@ -171,6 +171,78 @@
   margin-top: 2px;
 }
 
+/* --- full-screen overlay: scoreboard (Shift) / round-over --- */
+.overlay {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  background: rgba(11, 14, 20, 0.82);
+  text-align: center;
+}
+.winner {
+  font-size: 40px;
+  font-weight: 800;
+  letter-spacing: 4px;
+  color: #5151d9;
+  text-shadow: 0 0 18px rgba(81, 81, 217, 0.6);
+}
+.winnerSub {
+  font-size: 15px;
+  letter-spacing: 2px;
+  color: #9fb3c8;
+  text-transform: uppercase;
+}
+.statTable {
+  border-collapse: collapse;
+  width: min(560px, 86%);
+  font-size: 13px;
+}
+.statTable th {
+  font-size: 11px;
+  letter-spacing: 1px;
+  color: #76b3e3;
+  padding: 4px 8px;
+  border-bottom: 1px solid rgba(42, 51, 70, 0.9);
+  text-align: right;
+}
+.statTable td {
+  padding: 3px 8px;
+  text-align: right;
+  color: #cdd9e5;
+}
+.thRank {
+  width: 28px;
+  text-align: right !important;
+  color: #6b7a90;
+}
+.thName {
+  text-align: left !important;
+}
+.trMe td {
+  color: #ffffff;
+  font-weight: 700;
+  background: rgba(81, 81, 217, 0.3);
+}
+.nextRound {
+  margin-top: 6px;
+  font-size: 14px;
+  letter-spacing: 2px;
+  color: #ffd166;
+}
+.voteNote {
+  font-size: 12px;
+  color: #6b7a90;
+}
+.boardHint {
+  font-size: 12px;
+  color: #6b7a90;
+  letter-spacing: 1px;
+}
+
 /* --- center: dead state --- */
 .dead {
   position: absolute;

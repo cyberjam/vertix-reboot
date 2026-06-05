@@ -30,6 +30,9 @@ interface Snapshot {
   timeRemainingMs: number;
   targetScore: number;
   mode: string;
+  phase: string;
+  winnerId: string;
+  winnerName: string;
 }
 
 interface KillEntry {
@@ -38,13 +41,29 @@ interface KillEntry {
   victim: string;
 }
 
-const EMPTY: Snapshot = { me: null, board: [], timeRemainingMs: 0, targetScore: 0, mode: "ffa" };
+const EMPTY: Snapshot = {
+  me: null,
+  board: [],
+  timeRemainingMs: 0,
+  targetScore: 0,
+  mode: "ffa",
+  phase: "playing",
+  winnerId: "",
+  winnerName: "",
+};
 
 /** Read a plain snapshot out of the live Colyseus schema. */
 function readSnapshot(room: Room, sessionId: string): Snapshot {
   const state = room.state as {
     players: { forEach(cb: (p: PlayerSnap, id: string) => void): void; get(id: string): PlayerSnap | undefined };
-    match: { timeRemainingMs: number; targetScore: number; mode: string };
+    match: {
+      timeRemainingMs: number;
+      targetScore: number;
+      mode: string;
+      phase: string;
+      winnerId: string;
+      winnerName: string;
+    };
   };
   const board: PlayerSnap[] = [];
   state.players.forEach((p, id) => {
@@ -67,10 +86,13 @@ function readSnapshot(room: Room, sessionId: string): Snapshot {
   const me = board.find((p) => p.id === sessionId) ?? null;
   return {
     me,
-    board: board.slice(0, MAX_LEADERBOARD),
+    board,
     timeRemainingMs: state.match.timeRemainingMs,
     targetScore: state.match.targetScore,
     mode: state.match.mode,
+    phase: state.match.phase,
+    winnerId: state.match.winnerId,
+    winnerName: state.match.winnerName,
   };
 }
 
@@ -88,6 +110,7 @@ function healthColor(ratio: number): string {
 export default function Hud({ room, sessionId }: { room: Room; sessionId: string }) {
   const [snap, setSnap] = useState<Snapshot>(EMPTY);
   const [kills, setKills] = useState<KillEntry[]>([]);
+  const [showBoard, setShowBoard] = useState(false);
   const killId = useRef(0);
 
   // Throttled poll of the live schema (cheaper than re-rendering every frame).
@@ -114,7 +137,24 @@ export default function Hud({ room, sessionId }: { room: Room; sessionId: string
     return () => dispose();
   }, [room]);
 
+  // Hold Shift to view the full scoreboard (Vertix's "View Stats").
+  useEffect(() => {
+    const down = (e: KeyboardEvent) => {
+      if (e.key === "Shift") setShowBoard(true);
+    };
+    const up = (e: KeyboardEvent) => {
+      if (e.key === "Shift") setShowBoard(false);
+    };
+    window.addEventListener("keydown", down);
+    window.addEventListener("keyup", up);
+    return () => {
+      window.removeEventListener("keydown", down);
+      window.removeEventListener("keyup", up);
+    };
+  }, []);
+
   const { me, board } = snap;
+  const ended = snap.phase === "ended";
   const seconds = Math.max(0, Math.ceil(snap.timeRemainingMs / 1000));
   const mm = Math.floor(seconds / 60);
   const ss = `${seconds % 60}`.padStart(2, "0");
@@ -138,7 +178,7 @@ export default function Hud({ room, sessionId }: { room: Room; sessionId: string
       {/* leaderboard */}
       <div className={styles.leaderboard}>
         <div className={styles.leaderHeader}>LEADERBOARD</div>
-        {board.map((p, i) => (
+        {board.slice(0, MAX_LEADERBOARD).map((p, i) => (
           <div key={p.id} className={`${styles.row} ${p.id === sessionId ? styles.rowMe : ""}`}>
             <span className={styles.rowRank}>{i + 1}</span>
             <span className={styles.rowName}>{p.name}</span>
@@ -206,8 +246,65 @@ export default function Hud({ room, sessionId }: { room: Room; sessionId: string
         </div>
       ) : null}
 
-      {/* dead state */}
-      {me && !me.alive ? <div className={styles.dead}>☠ RESPAWNING…</div> : null}
+      {/* dead state (hidden while a full-screen overlay is showing) */}
+      {me && !me.alive && !ended && !showBoard ? (
+        <div className={styles.dead}>☠ RESPAWNING…</div>
+      ) : null}
+
+      {/* full-screen scoreboard (Shift) and round-over screen */}
+      {ended || showBoard ? (
+        <div className={styles.overlay}>
+          {ended ? (
+            <>
+              <div className={styles.winner}>
+                {snap.winnerId === sessionId ? "VICTORY" : "ROUND OVER"}
+              </div>
+              <div className={styles.winnerSub}>Winner: {snap.winnerName || "—"}</div>
+            </>
+          ) : (
+            <div className={styles.winnerSub}>SCOREBOARD</div>
+          )}
+
+          <StatTable board={board} sessionId={sessionId} />
+
+          {ended ? (
+            <>
+              <div className={styles.nextRound}>NEXT ROUND STARTING…</div>
+              <div className={styles.voteNote}>Mode voting — coming soon</div>
+            </>
+          ) : (
+            <div className={styles.boardHint}>Release Shift to close</div>
+          )}
+        </div>
+      ) : null}
     </div>
+  );
+}
+
+/** Full stats table shared by the Shift scoreboard and the round-over screen. */
+function StatTable({ board, sessionId }: { board: PlayerSnap[]; sessionId: string }) {
+  return (
+    <table className={styles.statTable}>
+      <thead>
+        <tr>
+          <th className={styles.thRank}>#</th>
+          <th className={styles.thName}>NAME</th>
+          <th>SCORE</th>
+          <th>KILLS</th>
+          <th>DEATHS</th>
+        </tr>
+      </thead>
+      <tbody>
+        {board.map((p, i) => (
+          <tr key={p.id} className={p.id === sessionId ? styles.trMe : ""}>
+            <td className={styles.thRank}>{i + 1}</td>
+            <td className={styles.thName}>{p.name}</td>
+            <td>{p.score}</td>
+            <td>{p.kills}</td>
+            <td>{p.deaths}</td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
   );
 }

@@ -133,7 +133,6 @@ export class ArenaScene extends Phaser.Scene {
   private keyQ!: Phaser.Input.Keyboard.Key;
   private aimGraphics!: Phaser.GameObjects.Graphics;
   private tracerGraphics!: Phaser.GameObjects.Graphics;
-  private bannerText!: Phaser.GameObjects.Text;
   private damageFlash!: Phaser.GameObjects.Rectangle;
   private prevMyHp = 0;
   private prevMyAlive = true;
@@ -214,21 +213,8 @@ export class ArenaScene extends Phaser.Scene {
     const width = this.scale.width;
     const height = this.scale.height;
 
-    // Round-over banner stays in Phaser; the live HUD readouts (HP/ammo/score/
-    // timer/scoreboard/kill feed) are rendered as a React DOM overlay.
-    this.bannerText = this.add
-      .text(width / 2, height / 2, "", {
-        fontFamily: "monospace",
-        fontSize: "28px",
-        color: "#ffd166",
-        align: "center",
-      })
-      .setOrigin(0.5)
-      .setScrollFactor(0)
-      .setDepth(11)
-      .setVisible(false);
-
-    // Full-screen red flash when the local player takes damage.
+    // The HUD readouts, scoreboard and round-over screen are React DOM overlays.
+    // Phaser keeps only the full-screen damage flash here (plus the in-world VFX).
     this.damageFlash = this.add
       .rectangle(width / 2, height / 2, width, height, 0xff3030, 0)
       .setScrollFactor(0)
@@ -280,7 +266,6 @@ export class ArenaScene extends Phaser.Scene {
     }
     this.renderViews();
     if (me) this.drawAim();
-    this.updateBanner(state.match);
   }
 
   private syncViews(players: StatePlayers): void {
@@ -594,12 +579,4 @@ export class ArenaScene extends Phaser.Scene {
     }
   }
 
-  private updateBanner(match: MatchStateView): void {
-    if (match.phase === "ended") {
-      const winner = match.winnerName.length > 0 ? match.winnerName : "—";
-      this.bannerText.setText(`ROUND OVER\nWinner: ${winner}\nnext round starting…`).setVisible(true);
-    } else {
-      this.bannerText.setVisible(false);
-    }
-  }
 }
