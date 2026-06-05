@@ -1,5 +1,5 @@
 import Phaser from "phaser";
-import { Client, type Room } from "colyseus.js";
+import { type Room } from "colyseus.js";
 import {
   WORLD,
   PLAYER,
@@ -20,7 +20,6 @@ const INTERP = 0.25; // interpolation factor for remote players
 const TRACER_MS = 70;
 const KILLFEED_MS = 4000;
 const SCOREBOARD_ROWS = 8;
-const SERVER_URL = process.env.NEXT_PUBLIC_GAME_SERVER_URL ?? "ws://localhost:2567";
 
 interface PlayerState {
   name: string;
@@ -112,7 +111,6 @@ type WASDKeys = {
  * the HUD, scoreboard, kill feed and round-result banner.
  */
 export class ArenaScene extends Phaser.Scene {
-  private client?: Client;
   private room?: Room;
   private mySessionId = "";
 
@@ -146,6 +144,12 @@ export class ArenaScene extends Phaser.Scene {
 
   constructor() {
     super("arena");
+  }
+
+  /** Receives the live Colyseus room injected by React (NetProvider). */
+  init(data: { room: Room; sessionId: string }): void {
+    this.room = data.room;
+    this.mySessionId = data.sessionId;
   }
 
   create(): void {
@@ -186,13 +190,9 @@ export class ArenaScene extends Phaser.Scene {
 
     this.buildHud();
 
-    const leave = () => {
-      void this.room?.leave();
-    };
-    this.events.once(Phaser.Scenes.Events.SHUTDOWN, leave);
-    this.events.once(Phaser.Scenes.Events.DESTROY, leave);
-
-    void this.connect();
+    // The connection is owned by React (NetProvider); the scene only wires up
+    // the room's one-off event messages (tracers / kill feed).
+    this.registerRoomHandlers();
   }
 
   private buildMap(): void {
@@ -253,21 +253,15 @@ export class ArenaScene extends Phaser.Scene {
       .setDepth(20);
   }
 
-  private async connect(): Promise<void> {
-    this.client = new Client(SERVER_URL);
-    const name = `Guest${Math.floor(1000 + Math.random() * 9000)}`;
-    try {
-      this.room = await this.client.joinOrCreate("arena", { name, classId: this.selectedClass });
-    } catch (err) {
-      console.error("[ArenaScene] failed to join room", err);
-      this.hudText.setText(
-        `Failed to connect to ${SERVER_URL}\nStart the game server: pnpm dev:server`,
-      );
-      return;
-    }
+  private registerRoomHandlers(): void {
+    const room = this.room;
+    if (!room) return;
+    // Seed the selected class from the player's current server state so the HUD
+    // "next class" hint stays accurate after joining via the menu.
+    const me = (room.state as { players: StatePlayers }).players.get(this.mySessionId);
+    if (me) this.selectedClass = me.classId;
 
-    this.mySessionId = this.room.sessionId;
-    this.room.onMessage("shot", (msg: ShotMessage) => {
+    room.onMessage("shot", (msg: ShotMessage) => {
       this.tracers.push({
         sx: msg.sx,
         sy: msg.sy,
@@ -282,7 +276,7 @@ export class ArenaScene extends Phaser.Scene {
         this.cameras.main.shake(60, 0.004);
       }
     });
-    this.room.onMessage("kill", (msg: KillMessage) => {
+    room.onMessage("kill", (msg: KillMessage) => {
       this.killFeed.push({
         killer: msg.killerName,
         victim: msg.victimName,
@@ -290,7 +284,7 @@ export class ArenaScene extends Phaser.Scene {
       });
       if (this.killFeed.length > 6) this.killFeed.shift();
     });
-    this.room.onLeave(() => this.hudText.setText("Disconnected from server"));
+    room.onLeave(() => this.hudText.setText("Disconnected from server"));
   }
 
   update(_time: number, deltaMs: number): void {
