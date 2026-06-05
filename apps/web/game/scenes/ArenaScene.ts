@@ -4,6 +4,7 @@ import {
   WORLD,
   PLAYER,
   MACHINEGUN,
+  HEALTH_PACK,
   ARENA01,
   stepMovement,
   type InputMessage,
@@ -48,6 +49,21 @@ interface MatchStateView {
 interface StatePlayers {
   forEach(callback: (player: PlayerState, key: string) => void): void;
   get(key: string): PlayerState | undefined;
+}
+
+interface HealthPackState {
+  x: number;
+  y: number;
+  active: boolean;
+}
+
+interface StateHealthPacks {
+  forEach(callback: (pack: HealthPackState, index: number) => void): void;
+}
+
+interface HealthPackMarker {
+  circle: Phaser.GameObjects.Arc;
+  plus: Phaser.GameObjects.Text;
 }
 
 interface PlayerView {
@@ -103,6 +119,7 @@ export class ArenaScene extends Phaser.Scene {
   private seq = 0;
   private tracers: Tracer[] = [];
   private killFeed: KillFeedEntry[] = [];
+  private healthPackMarkers: HealthPackMarker[] = [];
 
   private keys!: WASDKeys;
   private keyR!: Phaser.Input.Keyboard.Key;
@@ -169,18 +186,7 @@ export class ArenaScene extends Phaser.Scene {
         .setStrokeStyle(2, 0x5a6b8c)
         .setDepth(0);
     }
-    // Health pack locations (markers; pickup logic is a later milestone).
-    for (const hp of ARENA01.healthPacks) {
-      this.add.circle(hp.x, hp.y, 16, 0x2ecc71, 0.18).setDepth(0);
-      this.add
-        .text(hp.x, hp.y, "✚", {
-          fontFamily: "monospace",
-          fontSize: "20px",
-          color: "#2ecc71",
-        })
-        .setOrigin(0.5)
-        .setDepth(0);
-    }
+    // Health pack markers are created lazily and driven by server state.
   }
 
   private buildHud(): void {
@@ -264,8 +270,13 @@ export class ArenaScene extends Phaser.Scene {
     this.drawKillFeed();
     if (!this.room) return;
 
-    const state = this.room.state as { players: StatePlayers; match: MatchStateView };
+    const state = this.room.state as {
+      players: StatePlayers;
+      match: MatchStateView;
+      healthPacks: StateHealthPacks;
+    };
     this.syncViews(state.players);
+    this.updateHealthPacks(state.healthPacks);
 
     const me = state.players.get(this.mySessionId);
     if (me) this.handleLocalInput(me, deltaMs);
@@ -305,6 +316,29 @@ export class ArenaScene extends Phaser.Scene {
         view.label.destroy();
         this.views.delete(id);
       }
+    });
+  }
+
+  private updateHealthPacks(packs: StateHealthPacks): void {
+    packs.forEach((pack, i) => {
+      let marker = this.healthPackMarkers[i];
+      if (!marker) {
+        const circle = this.add
+          .circle(pack.x, pack.y, HEALTH_PACK.RADIUS, 0x2ecc71, 0.28)
+          .setDepth(0);
+        const plus = this.add
+          .text(pack.x, pack.y, "✚", {
+            fontFamily: "monospace",
+            fontSize: "20px",
+            color: "#2ecc71",
+          })
+          .setOrigin(0.5)
+          .setDepth(0);
+        marker = { circle, plus };
+        this.healthPackMarkers[i] = marker;
+      }
+      marker.circle.setAlpha(pack.active ? 0.28 : 0.06);
+      marker.plus.setVisible(pack.active);
     });
   }
 

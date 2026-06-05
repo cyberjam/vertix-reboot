@@ -37,6 +37,16 @@ export const MACHINEGUN = {
 export const RESPAWN_MS = 2000;
 
 /**
+ * Health pack pickups. Estimated from Vertix.io (map pickups, no passive
+ * regen): instant +50 heal on contact, then the pack respawns after a cooldown.
+ */
+export const HEALTH_PACK = {
+  HEAL: 50,
+  RADIUS: 18,
+  RESPAWN_MS: 15000,
+} as const;
+
+/**
  * Free-For-All match rules. Confirmed from Vertix.io: first to 1500 points
  * (≈15 kills at 100/kill) over a ~4 minute round.
  */
