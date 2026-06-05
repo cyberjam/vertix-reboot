@@ -7,6 +7,8 @@ import { PLAYER, MACHINEGUN, FFA } from "@vertix/shared";
  */
 export class Player extends Schema {
   @type("string") name = "";
+  @type("string") classId = "triggerman";
+  @type("string") weaponId = "machinegun";
   @type("number") x = 0;
   @type("number") y = 0;
   @type("number") angle = 0;

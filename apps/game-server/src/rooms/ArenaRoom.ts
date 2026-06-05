@@ -3,7 +3,6 @@ import {
   NET,
   WORLD,
   PLAYER,
-  MACHINEGUN,
   RESPAWN_MS,
   FFA,
   HEALTH_PACK,
@@ -13,22 +12,25 @@ import {
   rayCircleDistance,
   rayAabbDistance,
   getMap,
+  getClass,
+  getWeapon,
+  CLASSES,
+  DEFAULT_CLASS,
+  type WeaponDef,
   type MapDef,
   type Point,
   type InputMessage,
   type ShotMessage,
   type KillMessage,
   type JoinOptions,
+  type SelectClassMessage,
 } from "@vertix/shared";
 import { GameState, Player, HealthPack } from "../schema/GameState";
 
-/** Latest aim/fire intent (responsive), separate from queued movement. */
 type LatestInput = { aim: number; firing: boolean };
-type Timers = { nextFireAt: number; reloadEndsAt: number; respawnAt: number };
+type WeaponRuntime = { ammo: number; nextFireAt: number; reloadEndsAt: number; reloading: boolean };
 
-/** Max queued movement commands consumed per tick (anti-burst). */
 const MAX_CMDS_PER_TICK = 10;
-/** Hard cap on a player's pending movement queue. */
 const MAX_QUEUE = 120;
 const MAX_NAME_LENGTH = 16;
 
@@ -40,23 +42,26 @@ function envNumber(name: string, fallback: number): number {
 }
 
 /**
- * ArenaRoom — authoritative simulation of one Free-For-All match on a map.
+ * ArenaRoom — authoritative simulation of one Free-For-All match.
  *
- * The server owns all movement (with wall collision), firing (with bullet/wall
- * + line-of-sight blocking), hit detection, health, scoring and the round loop.
- * Clients send only intent.
+ * The server owns movement (wall collision), firing (per-weapon mag/reload,
+ * auto vs semi-auto, bullet/wall + line-of-sight blocking), hit detection,
+ * health, scoring and the round loop. Players choose a class (Triggerman or
+ * Hunter); class selection applies on respawn. Clients send only intent.
  */
 export class ArenaRoom extends Room<GameState> {
   private readonly latest = new Map<string, LatestInput>();
   private readonly queues = new Map<string, InputMessage[]>();
-  private readonly timers = new Map<string, Timers>();
+  private readonly weapons = new Map<string, Map<string, WeaponRuntime>>();
+  private readonly prevFiring = new Map<string, boolean>();
+  private readonly respawnAt = new Map<string, number>();
+  private readonly pendingClass = new Map<string, string>();
   private readonly reloadQueued = new Set<string>();
   private readonly map: MapDef = getMap(process.env.MAP_ID ?? "arena01");
   private readonly packRespawnAt: number[] = [];
   private elapsed = 0;
   private matchEndAt = 0;
 
-  // FFA rules (env-overridable for tuning / testing).
   private readonly targetScore = envNumber("FFA_TARGET_SCORE", FFA.TARGET_SCORE);
   private readonly durationMs = envNumber("FFA_DURATION_MS", FFA.DURATION_MS);
   private readonly endScreenMs = envNumber("FFA_END_SCREEN_MS", FFA.END_SCREEN_MS);
@@ -103,30 +108,51 @@ export class ArenaRoom extends Room<GameState> {
       this.reloadQueued.add(client.sessionId);
     });
 
+    this.onMessage<SelectClassMessage>("selectClass", (client, msg) => {
+      if (msg && typeof msg.classId === "string" && CLASSES[msg.classId]) {
+        this.pendingClass.set(client.sessionId, msg.classId);
+      }
+    });
+
+    this.onMessage("switchWeapon", (client) => {
+      this.switchWeapon(client.sessionId);
+    });
+
     this.setSimulationInterval((dt) => this.update(dt), 1000 / NET.TICKRATE);
     console.log(`[ArenaRoom] created: ${this.roomId} (map: ${this.map.id})`);
   }
 
   onJoin(client: Client, options?: JoinOptions): void {
+    const id = client.sessionId;
     const player = new Player();
-    player.name = this.sanitizeName(options?.name, client.sessionId);
+    player.name = this.sanitizeName(options?.name, id);
+    const classId = options?.classId && CLASSES[options.classId] ? options.classId : DEFAULT_CLASS;
+
+    this.latest.set(id, { aim: 0, firing: false });
+    this.queues.set(id, []);
+    this.prevFiring.set(id, false);
+    this.respawnAt.set(id, 0);
+    this.pendingClass.set(id, classId);
+
     const spawn = this.pickSpawn();
     player.x = spawn.x;
     player.y = spawn.y;
-    this.state.players.set(client.sessionId, player);
-    this.latest.set(client.sessionId, { aim: 0, firing: false });
-    this.queues.set(client.sessionId, []);
-    this.timers.set(client.sessionId, { nextFireAt: 0, reloadEndsAt: 0, respawnAt: 0 });
-    console.log(`[ArenaRoom] joined: ${player.name} (${client.sessionId})`);
+    this.state.players.set(id, player);
+    this.equipClass(id, player, classId);
+    console.log(`[ArenaRoom] joined: ${player.name} as ${classId} (${id})`);
   }
 
   onLeave(client: Client): void {
-    this.state.players.delete(client.sessionId);
-    this.latest.delete(client.sessionId);
-    this.queues.delete(client.sessionId);
-    this.timers.delete(client.sessionId);
-    this.reloadQueued.delete(client.sessionId);
-    console.log(`[ArenaRoom] left: ${client.sessionId}`);
+    const id = client.sessionId;
+    this.state.players.delete(id);
+    this.latest.delete(id);
+    this.queues.delete(id);
+    this.weapons.delete(id);
+    this.prevFiring.delete(id);
+    this.respawnAt.delete(id);
+    this.pendingClass.delete(id);
+    this.reloadQueued.delete(id);
+    console.log(`[ArenaRoom] left: ${id}`);
   }
 
   private update(dt: number): void {
@@ -143,14 +169,13 @@ export class ArenaRoom extends Room<GameState> {
     this.state.players.forEach((player, id) => {
       const latest = this.latest.get(id);
       const queue = this.queues.get(id);
-      const timers = this.timers.get(id);
-      if (!latest || !queue || !timers) return;
+      if (!latest || !queue) return;
 
       if (!player.alive) {
         const tail = queue[queue.length - 1];
         if (tail) player.lastSeq = tail.seq;
         queue.length = 0;
-        if (now >= timers.respawnAt) this.respawn(player, timers);
+        if (now >= (this.respawnAt.get(id) ?? 0)) this.respawn(id, player);
         return;
       }
 
@@ -158,9 +183,16 @@ export class ArenaRoom extends Room<GameState> {
       player.angle = latest.aim;
 
       if (match.phase === "playing") {
-        this.applyReload(id, player, timers, now);
-        this.applyFiring(id, player, latest.firing, timers, now);
+        const weapon = getWeapon(player.weaponId);
+        const runtime = this.weapons.get(id)?.get(player.weaponId);
+        if (runtime) {
+          this.applyReload(id, weapon, runtime, now);
+          this.applyFiring(id, player, weapon, runtime, latest.firing, now);
+          player.ammo = runtime.ammo;
+          player.reloading = runtime.reloading;
+        }
       }
+      this.prevFiring.set(id, latest.firing);
     });
 
     this.updateHealthPacks(now, match.phase === "playing");
@@ -170,45 +202,12 @@ export class ArenaRoom extends Room<GameState> {
     }
   }
 
-  private updateHealthPacks(now: number, allowPickup: boolean): void {
-    const packs = this.state.healthPacks;
-    const pickupRadius = PLAYER.RADIUS + HEALTH_PACK.RADIUS;
-
-    for (let i = 0; i < packs.length; i++) {
-      const pack = packs[i];
-      if (!pack) continue;
-
-      if (!pack.active) {
-        if (now >= (this.packRespawnAt[i] ?? 0)) pack.active = true;
-        continue;
-      }
-      if (!allowPickup) continue;
-
-      this.state.players.forEach((player) => {
-        if (!pack.active || !player.alive || player.hp >= player.maxHp) return;
-        const dist = Math.hypot(player.x - pack.x, player.y - pack.y);
-        if (dist <= pickupRadius) {
-          player.hp = Math.min(player.maxHp, player.hp + HEALTH_PACK.HEAL);
-          pack.active = false;
-          this.packRespawnAt[i] = now + this.packRespawnMs;
-        }
-      });
-    }
-  }
-
   private consumeMovement(player: Player, queue: InputMessage[]): void {
     let processed = 0;
     while (queue.length > 0 && processed < MAX_CMDS_PER_TICK) {
       const cmd = queue.shift();
       if (!cmd) break;
-      const next = stepMovement(
-        player.x,
-        player.y,
-        cmd.moveX,
-        cmd.moveY,
-        cmd.dtMs,
-        this.map.walls,
-      );
+      const next = stepMovement(player.x, player.y, cmd.moveX, cmd.moveY, cmd.dtMs, this.map.walls);
       player.x = next.x;
       player.y = next.y;
       player.lastSeq = cmd.seq;
@@ -216,48 +215,47 @@ export class ArenaRoom extends Room<GameState> {
     }
   }
 
-  private applyReload(id: string, player: Player, timers: Timers, now: number): void {
-    if (
-      this.reloadQueued.delete(id) &&
-      !player.reloading &&
-      player.ammo < MACHINEGUN.magSize
-    ) {
-      player.reloading = true;
-      timers.reloadEndsAt = now + MACHINEGUN.reloadMs;
+  private applyReload(id: string, weapon: WeaponDef, runtime: WeaponRuntime, now: number): void {
+    if (this.reloadQueued.delete(id) && !runtime.reloading && runtime.ammo < weapon.magSize) {
+      runtime.reloading = true;
+      runtime.reloadEndsAt = now + weapon.reloadMs;
     }
-    if (player.reloading && now >= timers.reloadEndsAt) {
-      player.ammo = MACHINEGUN.magSize;
-      player.reloading = false;
+    if (runtime.reloading && now >= runtime.reloadEndsAt) {
+      runtime.ammo = weapon.magSize;
+      runtime.reloading = false;
     }
   }
 
   private applyFiring(
     id: string,
     player: Player,
+    weapon: WeaponDef,
+    runtime: WeaponRuntime,
     firing: boolean,
-    timers: Timers,
     now: number,
   ): void {
-    if (!firing || player.reloading || player.ammo <= 0 || now < timers.nextFireAt) {
+    const prev = this.prevFiring.get(id) ?? false;
+    // Auto weapons fire while held; semi-auto fires once per trigger press.
+    const triggered = weapon.auto ? firing : firing && !prev;
+    if (!triggered || runtime.reloading || runtime.ammo <= 0 || now < runtime.nextFireAt) {
       return;
     }
 
-    player.ammo -= 1;
-    timers.nextFireAt = now + MACHINEGUN.fireRateMs;
-    this.fireHitscan(id, player);
+    runtime.ammo -= 1;
+    runtime.nextFireAt = now + weapon.fireRateMs;
+    this.fireHitscan(id, player, weapon);
 
-    if (player.ammo <= 0) {
-      player.reloading = true;
-      timers.reloadEndsAt = now + MACHINEGUN.reloadMs;
+    if (runtime.ammo <= 0) {
+      runtime.reloading = true;
+      runtime.reloadEndsAt = now + weapon.reloadMs;
     }
   }
 
-  private fireHitscan(shooterId: string, shooter: Player): void {
+  private fireHitscan(shooterId: string, shooter: Player, weapon: WeaponDef): void {
     const dirX = Math.cos(shooter.angle);
     const dirY = Math.sin(shooter.angle);
 
-    // Bullets are stopped by walls: clamp the ray to the nearest wall hit.
-    let maxRay: number = MACHINEGUN.rangePx;
+    let maxRay: number = weapon.rangePx;
     for (const wall of this.map.walls) {
       const t = rayAabbDistance(
         shooter.x,
@@ -273,7 +271,6 @@ export class ArenaRoom extends Room<GameState> {
       if (t !== null && t < maxRay) maxRay = t;
     }
 
-    // Only players in front of any blocking wall can be hit (line of sight).
     let closest: number = maxRay;
     let victim: Player | null = null;
     let victimId = "";
@@ -298,9 +295,9 @@ export class ArenaRoom extends Room<GameState> {
 
     if (victim !== null) {
       const hitPlayer = victim as Player;
-      hitPlayer.hp -= MACHINEGUN.damage;
+      hitPlayer.hp -= weapon.damage;
       if (hitPlayer.hp <= 0) {
-        this.handleKill(shooterId, shooter, victimId, hitPlayer);
+        this.handleKill(shooter, victimId, hitPlayer);
       }
     }
 
@@ -314,17 +311,11 @@ export class ArenaRoom extends Room<GameState> {
     this.broadcast("shot", shot);
   }
 
-  private handleKill(
-    shooterId: string,
-    shooter: Player,
-    victimId: string,
-    victim: Player,
-  ): void {
+  private handleKill(shooter: Player, victimId: string, victim: Player): void {
     victim.hp = 0;
     victim.alive = false;
     victim.deaths += 1;
-    const victimTimers = this.timers.get(victimId);
-    if (victimTimers) victimTimers.respawnAt = this.elapsed + RESPAWN_MS;
+    this.respawnAt.set(victimId, this.elapsed + RESPAWN_MS);
 
     shooter.kills += 1;
     shooter.score += FFA.KILL_SCORE;
@@ -333,19 +324,47 @@ export class ArenaRoom extends Room<GameState> {
     this.broadcast("kill", kill);
 
     if (shooter.score >= this.state.match.targetScore) {
-      this.endMatch(shooterId);
+      // Winner is the shooter; resolve via the shared end path.
+      this.endMatchWith(shooter);
     }
   }
 
-  private endMatch(winnerId?: string): void {
+  private switchWeapon(id: string): void {
+    const player = this.state.players.get(id);
+    if (!player || !player.alive) return;
+    const cls = getClass(player.classId);
+    if (!cls.secondary) return;
+
+    player.weaponId = player.weaponId === cls.primary ? cls.secondary : cls.primary;
+    const runtime = this.weapons.get(id)?.get(player.weaponId);
+    if (runtime) {
+      player.ammo = runtime.ammo;
+      player.reloading = runtime.reloading;
+    }
+    // Require a fresh trigger press after switching (avoids an instant shot).
+    this.prevFiring.set(id, true);
+  }
+
+  private endMatch(): void {
+    const id = this.topPlayerId();
+    const winner = id ? this.state.players.get(id) : undefined;
+    this.finishMatch(id, winner?.name ?? "");
+  }
+
+  private endMatchWith(winner: Player): void {
+    let winnerId = "";
+    this.state.players.forEach((p, id) => {
+      if (p === winner) winnerId = id;
+    });
+    this.finishMatch(winnerId, winner.name);
+  }
+
+  private finishMatch(winnerId: string, winnerName: string): void {
     const match = this.state.match;
     if (match.phase !== "playing") return;
-
-    const id = winnerId ?? this.topPlayerId();
-    const winner = id ? this.state.players.get(id) : undefined;
     match.phase = "ended";
-    match.winnerId = id;
-    match.winnerName = winner ? winner.name : "";
+    match.winnerId = winnerId;
+    match.winnerName = winnerName;
     this.matchEndAt = this.elapsed + this.endScreenMs;
   }
 
@@ -372,26 +391,72 @@ export class ArenaRoom extends Room<GameState> {
       player.score = 0;
       player.kills = 0;
       player.deaths = 0;
-      const timers = this.timers.get(id) ?? {
-        nextFireAt: 0,
-        reloadEndsAt: 0,
-        respawnAt: 0,
-      };
-      this.respawn(player, timers);
+      this.respawn(id, player);
     });
   }
 
-  private respawn(player: Player, timers: Timers): void {
+  private respawn(id: string, player: Player): void {
     const spawn = this.pickSpawn();
     player.x = spawn.x;
     player.y = spawn.y;
-    player.hp = PLAYER.MAX_HP;
-    player.ammo = MACHINEGUN.magSize;
-    player.reloading = false;
     player.alive = true;
-    timers.nextFireAt = 0;
-    timers.reloadEndsAt = 0;
-    timers.respawnAt = 0;
+    this.respawnAt.set(id, 0);
+    // Class selection takes effect on respawn.
+    const classId = this.pendingClass.get(id) ?? player.classId;
+    this.equipClass(id, player, classId);
+  }
+
+  /** Apply a class: HP, loadout and fresh per-weapon ammo. */
+  private equipClass(id: string, player: Player, classId: string): void {
+    const cls = getClass(classId);
+    player.classId = cls.id;
+    player.maxHp = cls.maxHp;
+    player.hp = cls.maxHp;
+    player.weaponId = cls.primary;
+
+    const runtimes = new Map<string, WeaponRuntime>();
+    const ids = cls.secondary ? [cls.primary, cls.secondary] : [cls.primary];
+    for (const weaponId of ids) {
+      const weapon = getWeapon(weaponId);
+      runtimes.set(weaponId, {
+        ammo: weapon.magSize,
+        nextFireAt: 0,
+        reloadEndsAt: 0,
+        reloading: false,
+      });
+    }
+    this.weapons.set(id, runtimes);
+    this.prevFiring.set(id, false);
+
+    const primary = getWeapon(cls.primary);
+    player.ammo = primary.magSize;
+    player.reloading = false;
+  }
+
+  private updateHealthPacks(now: number, allowPickup: boolean): void {
+    const packs = this.state.healthPacks;
+    const pickupRadius = PLAYER.RADIUS + HEALTH_PACK.RADIUS;
+
+    for (let i = 0; i < packs.length; i++) {
+      const pack = packs[i];
+      if (!pack) continue;
+
+      if (!pack.active) {
+        if (now >= (this.packRespawnAt[i] ?? 0)) pack.active = true;
+        continue;
+      }
+      if (!allowPickup) continue;
+
+      this.state.players.forEach((player) => {
+        if (!pack.active || !player.alive || player.hp >= player.maxHp) return;
+        const dist = Math.hypot(player.x - pack.x, player.y - pack.y);
+        if (dist <= pickupRadius) {
+          player.hp = Math.min(player.maxHp, player.hp + HEALTH_PACK.HEAL);
+          pack.active = false;
+          this.packRespawnAt[i] = now + this.packRespawnMs;
+        }
+      });
+    }
   }
 
   /** Pick the spawn point farthest from the nearest living enemy (anti spawn-kill). */
