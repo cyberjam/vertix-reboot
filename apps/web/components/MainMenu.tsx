@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { CLASS_IDS, DEFAULT_CLASS, getClass, getWeapon } from "@vertix/shared";
 import { useNet } from "@/game/net/NetProvider";
+import ServerBrowser from "./ServerBrowser";
 import SettingsModal from "./SettingsModal";
 import styles from "./MainMenu.module.css";
 
@@ -23,6 +24,7 @@ export default function MainMenu() {
   const { connect, status, error } = useNet();
   const [name, setName] = useState("");
   const [classId, setClassId] = useState<string>(DEFAULT_CLASS);
+  const [showBrowser, setShowBrowser] = useState(false);
   const [showSettings, setShowSettings] = useState(false);
   const [settingsTab, setSettingsTab] = useState<"settings" | "controls">("settings");
 
@@ -99,6 +101,14 @@ export default function MainMenu() {
 
         {error ? <p className={styles.error}>{error}</p> : null}
 
+        <button
+          className={styles.browserBtn}
+          onClick={() => setShowBrowser(true)}
+          disabled={connecting}
+        >
+          Browse Servers
+        </button>
+
         <div className={styles.menuLinks}>
           <button
             className={styles.menuLink}
@@ -116,6 +126,7 @@ export default function MainMenu() {
         </div>
       </div>
 
+      {showBrowser && <ServerBrowser onClose={() => setShowBrowser(false)} />}
       {showSettings && (
         <SettingsModal initialTab={settingsTab} onClose={() => setShowSettings(false)} />
       )}
