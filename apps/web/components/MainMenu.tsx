@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { CLASS_IDS, DEFAULT_CLASS, getClass, getWeapon } from "@vertix/shared";
 import { useNet } from "@/game/net/NetProvider";
 import ServerBrowser from "./ServerBrowser";
+import SettingsModal from "./SettingsModal";
 import styles from "./MainMenu.module.css";
 
 const NAME_KEY = "vertix.playerName";
@@ -24,6 +25,8 @@ export default function MainMenu() {
   const [name, setName] = useState("");
   const [classId, setClassId] = useState<string>(DEFAULT_CLASS);
   const [showBrowser, setShowBrowser] = useState(false);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"settings" | "controls">("settings");
 
   // Restore persisted choices on mount (client-only to avoid SSR mismatch).
   useEffect(() => {
@@ -105,9 +108,28 @@ export default function MainMenu() {
         >
           Browse Servers
         </button>
+
+        <div className={styles.menuLinks}>
+          <button
+            className={styles.menuLink}
+            onClick={() => { setSettingsTab("settings"); setShowSettings(true); }}
+          >
+            SETTINGS
+          </button>
+          <span className={styles.menuDivider}>·</span>
+          <button
+            className={styles.menuLink}
+            onClick={() => { setSettingsTab("controls"); setShowSettings(true); }}
+          >
+            CONTROLS
+          </button>
+        </div>
       </div>
 
       {showBrowser && <ServerBrowser onClose={() => setShowBrowser(false)} />}
+      {showSettings && (
+        <SettingsModal initialTab={settingsTab} onClose={() => setShowSettings(false)} />
+      )}
     </div>
   );
 }
