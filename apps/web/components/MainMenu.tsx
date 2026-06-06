@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { CLASS_IDS, DEFAULT_CLASS, getClass, getWeapon } from "@vertix/shared";
 import { useNet } from "@/game/net/NetProvider";
+import SettingsModal from "./SettingsModal";
 import styles from "./MainMenu.module.css";
 
 const NAME_KEY = "vertix.playerName";
@@ -22,6 +23,8 @@ export default function MainMenu() {
   const { connect, status, error } = useNet();
   const [name, setName] = useState("");
   const [classId, setClassId] = useState<string>(DEFAULT_CLASS);
+  const [showSettings, setShowSettings] = useState(false);
+  const [settingsTab, setSettingsTab] = useState<"settings" | "controls">("settings");
 
   // Restore persisted choices on mount (client-only to avoid SSR mismatch).
   useEffect(() => {
@@ -95,10 +98,27 @@ export default function MainMenu() {
         </button>
 
         {error ? <p className={styles.error}>{error}</p> : null}
-        <p className={styles.hint}>
-          WASD move · Space jump · mouse aim · click fire · R reload · Q weapon
-        </p>
+
+        <div className={styles.menuLinks}>
+          <button
+            className={styles.menuLink}
+            onClick={() => { setSettingsTab("settings"); setShowSettings(true); }}
+          >
+            SETTINGS
+          </button>
+          <span className={styles.menuDivider}>·</span>
+          <button
+            className={styles.menuLink}
+            onClick={() => { setSettingsTab("controls"); setShowSettings(true); }}
+          >
+            CONTROLS
+          </button>
+        </div>
       </div>
+
+      {showSettings && (
+        <SettingsModal initialTab={settingsTab} onClose={() => setShowSettings(false)} />
+      )}
     </div>
   );
 }
