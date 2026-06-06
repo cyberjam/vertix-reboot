@@ -1,5 +1,7 @@
 # Vertix Reboot
 
+**English** · [한국어](./README.ko.md)
+
 A browser-based multiplayer arena shooter you can jump into in seconds. Pick a
 name, pick a class, and you're in the match — no installs, no accounts.
 
