@@ -1,73 +1,109 @@
 # Vertix Reboot
 
-**English** · [한국어](./README.ko.md)
+A browser-based multiplayer arena shooter you can jump into in seconds. Pick a
+name, pick a class, and you're in the match — no installs, no accounts.
 
-A fast, top-down multiplayer shooter that runs in your browser. Pick a class,
-drop into the arena, and fight.
+Vertix Reboot is an open-source reimagining of the kind of fast, top-down
+browser shooter that [Vertix Online](https://en.wikipedia.org/wiki/Vertix.io)
+made fun: short rounds, instant respawns, simple controls, and friends dropping
+in from a link. It's built from scratch on a modern stack and is still in active
+development.
 
 ![status](https://img.shields.io/badge/status-playable%20alpha-orange)
 ![stack](https://img.shields.io/badge/built%20with-Next.js%20%2B%20Phaser%20%2B%20Colyseus-5151d9)
 ![license](https://img.shields.io/badge/license-MIT-blue)
 ![PRs](https://img.shields.io/badge/PRs-welcome-brightgreen)
 
-> **Gameplay GIF goes here** — a round in motion: movement, a couple of kills, a
-> respawn. Show the game, not the menus.
-
-**Status:** playable alpha — run it locally today. Hosted play is on the
-[roadmap](#roadmap).
+> **Gameplay GIF / screenshot goes here.**
+> _Drop a short clip of a round in progress — movement, a couple of kills, a
+> respawn. This is the first thing people see; show the game, not the menus._
 
 ---
 
-## Why Play
+## About
 
-- ⚡ **Instant join** — open the page, type a name, you're in. No install, no account.
-- 🔁 **Fast rounds** — respawn in seconds and keep fighting. First to 1500 points (or top score when the 4-minute clock runs out) wins, then it resets.
-- 🎯 **Class-based combat** — three classes, each with its own weapons and trade-offs.
-- 🌐 **Real multiplayer** — everyone shares one live arena, right in the browser.
+It's a free-for-all top-down shooter that runs in the browser. You spawn into an
+arena with everyone else, fight, die, respawn a couple of seconds later, and
+keep going until someone hits the score limit or the round timer runs out. Then
+it resets and you go again.
+
+**Why build it?** The "open a link and you're instantly in a match" browser
+shooter is a great format that doesn't get made much anymore. This is an attempt
+to rebuild that feel on a stack that's pleasant to work on and easy to
+contribute to — server-authoritative netcode, a typed shared core, and a clean
+React/Phaser client.
+
+**The goal** is a small, honest game that's genuinely fun to play with a few
+friends for ten minutes: quick to join, quick to learn, quick to replay. Not a
+platform, not a storefront — just the loop.
 
 ---
 
 ## Features
 
-- **Three classes, four weapons** — each trades HP for firepower or range:
-  - **Triggerman** — machine gun. The all-rounder.
-  - **Hunter** — sniper + machine pistol. Fragile, lethal at distance.
-  - **Vince** — four-pellet shotgun. Close-range burst damage.
-- **Switch class when you die** — pick your counter on the respawn screen.
-- **Cover matters** — walls block bullets *and* line of sight.
-- **Health packs** spawn around the map.
-- **Live HUD** — health, ammo, round timer, leaderboard, kill feed, and a death
-  screen showing who got you.
-- **Minimap** and a full scoreboard (hold **Shift**).
-- **Server browser** — quick-match into the best room, or browse and join by
-  player count.
-- **Jump** (**Space**), plus settings for camera shake and effects (saved locally).
+Everything below is implemented and playable when you run it locally.
 
----
+- **Instant play.** Open `/play`, type a name, pick a class, hit **Enter Game**.
+  No login, no download. Your name and class are remembered for next time.
+- **Three classes, four weapons.** Each plays differently:
+  - **Triggerman** — 100 HP, machine gun. The all-rounder.
+  - **Hunter** — 50 HP, sniper + machine pistol. Fragile, deadly at range.
+  - **Vince** — 100 HP, four-pellet shotgun. Close-range burst damage.
+- **Fast respawn.** Get killed, optionally swap to a different class, and you're
+  back in the fight about two seconds later.
+- **Server-authoritative netcode.** The server owns all movement, shooting and
+  hit detection — but your own movement is predicted locally and reconciled, so
+  it stays responsive instead of rubber-banding.
+- **Cover and line of sight.** Walls block both bullets and sight; you can't
+  shoot through them, and you can't be shot through them.
+- **Health packs** placed around the map, with respawn cooldowns.
+- **Free-for-all rounds.** 100 points per kill; first to 1500 points — or the
+  highest score when the 4-minute timer ends — wins. Then the round resets.
+- **Full HUD.** Health, ammo, round timer, live leaderboard and a kill feed.
+- **Minimap** showing walls, players and active health packs.
+- **Scoreboard** on hold-**Shift**, and a death overlay that shows who killed
+  you, lets you switch class, and counts down to respawn.
+- **Jump** (**Space**) — a quick vertical hop.
+- **Server browser.** Quick-match into the best room, or browse open rooms and
+  join one by player count.
+- **Settings.** Toggle camera shake and visual effects, view the controls
+  reference; preferences persist in your browser.
 
-## Controls
+### Controls
 
-| Key | Action | | Key | Action |
-|-----|--------|---|-----|--------|
-| `W` `A` `S` `D` | Move | | `Q` | Switch weapon |
-| Mouse | Aim | | `1` `2` `3` | Select class (on respawn) |
-| Left Click | Fire | | `Space` | Jump |
-| `R` | Reload | | `Shift` | Scoreboard |
+| Key | Action |
+|-----|--------|
+| `W` `A` `S` `D` | Move |
+| Mouse | Aim |
+| Left Click | Fire |
+| `R` | Reload |
+| `Q` | Switch weapon |
+| `1` / `2` / `3` | Select class (applies on respawn) |
+| `Space` | Jump |
+| `Shift` | View full scoreboard |
+| `Esc` | Close overlays |
 
 ---
 
 ## Roadmap
 
-**In progress**
-- Hosted play — web on Vercel, game server on Render (Docker, health check, CORS).
+### In progress
 
-**Planned**
+- **Public hosted build** — so you can play in the browser without running
+  anything yourself. Web on Vercel, the game server on Render, with a Docker
+  image, health check and CORS for production.
+
+### Planned
+
 - Sound effects
-- More classes, weapons, and modes (e.g. Team Deathmatch)
-- Key rebinding and killstreak callouts
-- Optional accounts / persistent stats (undecided)
+- More classes and weapons
+- More modes (e.g. Team Deathmatch)
+- Key rebinding
+- Killstreak callouts ("Double Kill", etc.)
+- Optional accounts / persistent stats (still being decided)
 
-Only what's listed under [Features](#features) is built today.
+Implemented features live under [Features](#features); anything not listed there
+isn't built yet.
 
 ---
 
@@ -75,45 +111,82 @@ Only what's listed under [Features](#features) is built today.
 
 | Layer | Tech |
 |-------|------|
-| **Client** | Next.js 15 + React 19 (UI/overlays), Phaser 3 (rendering & input), TypeScript |
-| **Server** | Colyseus 0.16 authoritative game server (Node 20, TypeScript) |
-| **Realtime** | WebSocket state sync (30 Hz sim, 50 ms patches) with client-side prediction & reconciliation |
-| **Shared** | `@vertix/shared` — class/weapon/map data + movement sim, one source of truth for client and server |
-| **Tooling** | pnpm workspaces + Turborepo |
+| **Frontend** | Next.js 15 (App Router), React 19, TypeScript — UI, menus and overlays. [Phaser 3](https://phaser.io) for in-game rendering and input. |
+| **Backend** | [Colyseus](https://colyseus.io) 0.16 authoritative game server (Node 20, TypeScript). |
+| **Realtime** | WebSocket state sync via Colyseus schema (30 Hz simulation, 50 ms patch rate). `colyseus.js` on the client with movement prediction + reconciliation. |
+| **Shared core** | `@vertix/shared` — class/weapon/map data and the deterministic movement simulation, imported by both client and server as a single source of truth. |
+| **Tooling** | pnpm workspaces + Turborepo monorepo. |
+| **Deployment** | Vercel (web) + Render (game server) — _planned, see Roadmap._ |
 
 ---
 
 ## Local Development
 
-Requires [Node.js](https://nodejs.org) ≥ 20 and [pnpm](https://pnpm.io).
+**Prerequisites:** [Node.js](https://nodejs.org) ≥ 20 and
+[pnpm](https://pnpm.io) (via `corepack`).
 
 ```bash
-corepack enable      # enable pnpm if you don't have it
+# 1. enable pnpm if you don't have it
+corepack enable
+
+# 2. install dependencies
 pnpm install
-pnpm dev             # web client + game server together
+
+# 3. run the web client and game server together
+pnpm dev
 ```
 
-- Web → http://localhost:3000 (landing page links to `/play`)
-- Server → `ws://localhost:2567`
+- Web client → http://localhost:3000 (the landing page links to `/play`)
+- Game server → `ws://localhost:2567`
 
-Open `/play` in two tabs to test multiplayer. Run `pnpm dev:web` / `pnpm
-dev:server` to start them separately, and `pnpm typecheck` / `pnpm build` to
-check the workspace. Design docs live in [`docs/design`](./docs/design/README.md).
+Run them separately if you prefer:
+
+```bash
+pnpm dev:web      # Next.js client only  (:3000)
+pnpm dev:server   # Colyseus server only (:2567)
+```
+
+**Try multiplayer:** open `/play` in two browser tabs (or two browsers) and
+you'll see both players in the same arena.
+
+**Checks:**
+
+```bash
+pnpm typecheck    # type-check every package
+pnpm build        # build everything
+```
+
+The design docs live in [`docs/design`](./docs/design/README.md).
+
+---
+
+## Deployment
+
+Hosted play isn't live yet — it's the current focus on the Roadmap. The intended
+setup is the web client on **Vercel** (root `apps/web`) and the authoritative
+game server on **Render** as a Docker service, with the client pointed at the
+server via `NEXT_PUBLIC_GAME_SERVER_URL` (use `wss://` from an HTTPS page).
+Production config (Dockerfile, health check, CORS) is landing alongside it.
 
 ---
 
 ## Contributing
 
-PRs welcome — fixes, balance tweaks, new weapons or classes, or just feedback
-after a few rounds.
+This is a small indie project and contributions are welcome — bug fixes,
+gameplay tweaks, new weapons or classes, or just trying it and reporting what
+felt off.
 
-1. Branch from `dev` (e.g. `feat/your-thing`).
-2. Keep gameplay **server-authoritative**: the client sends intent, the server
-   decides outcomes. New classes/weapons go in `@vertix/shared`.
-3. Run `pnpm typecheck` and `pnpm build`, then open a PR against `dev`.
+1. Fork the repo and branch from `dev` (e.g. `feat/your-thing`).
+2. Make your change. Keep gameplay **server-authoritative** — the client sends
+   intent, the server decides outcomes.
+3. Run `pnpm typecheck` and `pnpm build` before opening a PR.
+4. Open a pull request against `dev`.
+
+If you're adding a class or weapon, define it in `@vertix/shared` so the client
+and server stay in sync from one place.
 
 ---
 
 ## License
 
-[MIT](./LICENSE).
+Released under the MIT License.
