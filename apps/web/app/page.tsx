@@ -14,18 +14,7 @@ function Stage() {
   const { status, room, sessionId } = useNet();
 
   if (status === "connected" && room) {
-    return (
-      <main
-        style={{
-          display: "flex",
-          justifyContent: "center",
-          alignItems: "center",
-          minHeight: "100vh",
-        }}
-      >
-        <PhaserGame room={room} sessionId={sessionId} />
-      </main>
-    );
+    return <PhaserGame room={room} sessionId={sessionId} />;
   }
 
   return <MainMenu />;
