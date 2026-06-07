@@ -117,6 +117,14 @@ export class ArenaScene extends Phaser.Scene {
   private pending: InputMessage[] = [];
   private localAim = 0;
   private seq = 0;
+  /**
+   * Whether the fire button is currently held. Latched on pointer down/up edges
+   * rather than polled from `pointer.buttons` each frame: Phaser overwrites
+   * `buttons` on every pointer-move event, so a top-down shooter (which moves
+   * the mouse constantly while firing) would drop the held state and fire only
+   * once. The server decides auto vs semi-auto from this held intent.
+   */
+  private firePressed = false;
   private tracers: Tracer[] = [];
   private healthPackMarkers: HealthPackMarker[] = [];
 
@@ -191,6 +199,16 @@ export class ArenaScene extends Phaser.Scene {
     this.keyTwo = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.TWO);
     this.keyThree = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.THREE);
     this.keyQ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
+
+    // Latch the fire button on the press/release edges (left button only) so a
+    // held button keeps firing while the mouse moves to aim. pointerup fires on
+    // the window too, so releasing off-canvas still stops firing.
+    this.input.on("pointerdown", (pointer: Phaser.Input.Pointer) => {
+      if (pointer.leftButtonDown()) this.firePressed = true;
+    });
+    this.input.on("pointerup", (pointer: Phaser.Input.Pointer) => {
+      if (!pointer.leftButtonDown()) this.firePressed = false;
+    });
 
     this.buildHud();
 
@@ -398,7 +416,7 @@ export class ArenaScene extends Phaser.Scene {
       world.y,
     );
 
-    const firing = pointer.leftButtonDown();
+    const firing = this.firePressed;
     const jumpHeld = this.keySpace.isDown;
     this.seq += 1;
     const cmd: InputMessage = {
