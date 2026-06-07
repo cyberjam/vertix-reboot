@@ -137,6 +137,7 @@ export class ArenaScene extends Phaser.Scene {
   private damageFlash!: Phaser.GameObjects.Rectangle;
   private prevMyHp = 0;
   private prevMyAlive = true;
+  private isFiringDown = false;
 
   constructor() {
     super("arena");
@@ -193,6 +194,16 @@ export class ArenaScene extends Phaser.Scene {
     this.keyQ = this.input.keyboard!.addKey(Phaser.Input.Keyboard.KeyCodes.Q);
 
     this.buildHud();
+
+    // Track left-button held state via events rather than polling leftButtonDown()
+    // so the flag stays accurate even if the pointer's buttons bitmask isn't
+    // refreshed every frame in the browser's event model.
+    this.input.on(Phaser.Input.Events.POINTER_DOWN, (p: Phaser.Input.Pointer) => {
+      if (p.leftButtonDown()) this.isFiringDown = true;
+    });
+    this.input.on(Phaser.Input.Events.POINTER_UP, (p: Phaser.Input.Pointer) => {
+      if (!p.leftButtonDown()) this.isFiringDown = false;
+    });
 
     // The connection is owned by React (NetProvider); the scene only wires up
     // the room's one-off event messages (tracers / kill feed).
@@ -398,7 +409,7 @@ export class ArenaScene extends Phaser.Scene {
       world.y,
     );
 
-    const firing = pointer.leftButtonDown();
+    const firing = this.isFiringDown;
     const jumpHeld = this.keySpace.isDown;
     this.seq += 1;
     const cmd: InputMessage = {
