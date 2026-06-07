@@ -19,7 +19,7 @@ export const PLAYER = {
 } as const;
 
 /** Delay before a dead player respawns (ms). */
-export const RESPAWN_MS = 2000;
+export const RESPAWN_MS = 5000;
 
 /**
  * Jump (vertical hop). Top-down so jumping is an orthogonal vertical axis
