@@ -433,10 +433,11 @@ export class ArenaScene extends Phaser.Scene {
     }
   }
 
-  /** Local prediction of the jump arc (matches the server's stepJump). */
+  /** Local prediction of the jump arc (matches the server's applyJump/stepJump). */
   private predictJump(deltaMs: number): void {
+    // Held key auto-hops again once grounded and off cooldown (matches server).
     if (
-      Phaser.Input.Keyboard.JustDown(this.keySpace) &&
+      this.keySpace.isDown &&
       this.localJumpY <= 0 &&
       this.time.now >= this.localJumpReadyAt
     ) {
