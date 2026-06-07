@@ -57,7 +57,6 @@ export class ArenaRoom extends Room<GameState> {
   private readonly weapons = new Map<string, Map<string, WeaponRuntime>>();
   private readonly prevFiring = new Map<string, boolean>();
   private readonly jumpVel = new Map<string, number>();
-  private readonly prevJump = new Map<string, boolean>();
   private readonly jumpReadyAt = new Map<string, number>();
   private readonly respawnAt = new Map<string, number>();
   private readonly pendingClass = new Map<string, string>();
@@ -141,7 +140,6 @@ export class ArenaRoom extends Room<GameState> {
     this.queues.set(id, []);
     this.prevFiring.set(id, false);
     this.jumpVel.set(id, 0);
-    this.prevJump.set(id, false);
     this.jumpReadyAt.set(id, 0);
     this.respawnAt.set(id, 0);
     this.pendingClass.set(id, classId);
@@ -162,7 +160,6 @@ export class ArenaRoom extends Room<GameState> {
     this.weapons.delete(id);
     this.prevFiring.delete(id);
     this.jumpVel.delete(id);
-    this.prevJump.delete(id);
     this.jumpReadyAt.delete(id);
     this.respawnAt.delete(id);
     this.pendingClass.delete(id);
@@ -236,16 +233,17 @@ export class ArenaRoom extends Room<GameState> {
   }
 
   /**
-   * Authoritative vertical hop. Independent of x/y movement and hit detection:
-   * starts on the rising edge of the jump key when grounded and off cooldown,
-   * then integrates the arc each tick and replicates `jumpY`.
+   * Authoritative vertical hop. Independent of x/y movement and hit detection.
+   * Fires whenever the jump key is held and the player is grounded and off
+   * cooldown — so a held key auto-hops again on landing (after the cooldown),
+   * while releasing the key stops further hops. Integrates the arc each tick
+   * and replicates `jumpY`.
    */
   private applyJump(id: string, player: Player, jump: boolean, now: number, dt: number): void {
-    const prev = this.prevJump.get(id) ?? false;
     let vel = this.jumpVel.get(id) ?? 0;
     const wasAirborne = player.jumpY > 0;
 
-    if (jump && !prev && player.jumpY <= 0 && now >= (this.jumpReadyAt.get(id) ?? 0)) {
+    if (jump && player.jumpY <= 0 && now >= (this.jumpReadyAt.get(id) ?? 0)) {
       vel = JUMP.STRENGTH;
     }
 
@@ -253,7 +251,6 @@ export class ArenaRoom extends Room<GameState> {
     player.jumpY = step.jumpY;
     this.jumpVel.set(id, step.jumpVel);
     if (wasAirborne && step.grounded) this.jumpReadyAt.set(id, now + JUMP.COOLDOWN_MS);
-    this.prevJump.set(id, jump);
   }
 
   private applyReload(id: string, weapon: WeaponDef, runtime: WeaponRuntime, now: number): void {
@@ -454,7 +451,6 @@ export class ArenaRoom extends Room<GameState> {
     player.alive = true;
     this.respawnAt.set(id, 0);
     this.jumpVel.set(id, 0);
-    this.prevJump.set(id, false);
     this.jumpReadyAt.set(id, 0);
     // Class selection takes effect on respawn.
     const classId = this.pendingClass.get(id) ?? player.classId;
