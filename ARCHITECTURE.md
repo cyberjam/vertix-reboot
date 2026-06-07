@@ -1,7 +1,7 @@
 # ARCHITECTURE.md
 
 Vertix.io Reboot의 런타임 아키텍처. 전체 현황은 [PROJECT_STATE.md](./PROJECT_STATE.md), 설계 배경은
-[docs/design/](./docs/design/README.md) 참조. 기준 커밋 `3158d47` (PR #16).
+[docs/design/](./docs/design/README.md) 참조. 기준 브랜치 `dev` (커밋 `dde94f6`).
 
 핵심 원칙: **서버 권위(authoritative)** · **Top-down TPS** · **`@vertix/shared` 단일 진실 공급원**
 (정적 정의는 공유, 가변 상태는 Colyseus Schema, 결정론 이동은 클라/서버 공용).
@@ -24,7 +24,7 @@ MapDef     { walls[],spawnPoints[],healthPacks[] }      HealthPack
 **복제되는 엔티티 (서버 권위, `GameState`):**
 | 엔티티 | 컬렉션 | 핵심 필드 |
 |--------|--------|-----------|
-| `Player` | `players: MapSchema<Player>` (키=sessionId) | name, classId, weaponId, x, y, angle, hp, maxHp, ammo, reloading, alive, kills, deaths, score, lastSeq |
+| `Player` | `players: MapSchema<Player>` (키=sessionId) | name, classId, weaponId, x, y, **jumpY**, angle, hp, maxHp, ammo, reloading, alive, kills, deaths, score, lastSeq |
 | `HealthPack` | `healthPacks: ArraySchema<HealthPack>` | x, y, active |
 | `MatchState` | `match: MatchState` (단일) | mode, phase, timeRemainingMs, targetScore, winnerId, winnerName |
 
@@ -41,7 +41,8 @@ MapDef     { walls[],spawnPoints[],healthPacks[] }      HealthPack
 한 경기 = 하나의 `ArenaRoom` 인스턴스 (Colyseus `Room<GameState>`).
 
 ```
-onCreate → setState(GameState) · 맵 로드(getMap) · 헬스팩 시드 · setPatchRate(50ms)
+onCreate → maxClients=8 · setMetadata({mode,map})(서버 브라우저용) · setState(GameState)
+         · 맵 로드(getMap) · 헬스팩 시드 · setPatchRate(50ms)
          · onMessage 등록(input/reload/switchWeapon/selectClass)
          · setSimulationInterval(update, 1000/30)   // 30Hz 권위 틱
 onJoin   → Player 생성 · pickSpawn(적과 가장 먼 스폰) · equipClass(클래스 HP/무기/탄약)
@@ -49,9 +50,9 @@ onLeave  → 모든 서버측 맵에서 해당 sessionId 제거
 update(dt) [매 틱]:
    match 시간 차감 / phase 전환(playing↔ended, 종료 후 자동 reset)
    각 Player:
-     dead?  → 입력 ack + respawnAt 도달 시 respawn
+     dead?  → 입력 ack + jumpY 리셋 + respawnAt 도달 시 respawn
      alive? → consumeMovement(입력 큐 소비, stepMovement+벽충돌, lastSeq)
-            → angle 갱신 · applyReload · applyFiring(자동=홀드 / 반자동=엣지)
+            → angle 갱신 · applyJump(홀드+지면+쿨다운 → stepJump) · applyReload · applyFiring(자동=홀드 / 반자동=엣지)
             → player.ammo/reloading ← 활성 무기 런타임 동기화
    updateHealthPacks(픽업/재생성)
    목표 점수/시간 종료 판정 → endMatch
@@ -60,10 +61,11 @@ update(dt) [매 틱]:
 **서버 전용(미복제) 상태 — Room 필드 Map들:**
 | 필드 | 용도 |
 |------|------|
-| `latest: Map<id,{aim,firing}>` | 최신 조준/발사(즉응) |
+| `latest: Map<id,{aim,firing,jump}>` | 최신 조준/발사/점프(즉응) |
 | `queues: Map<id,InputMessage[]>` | 순서 보장 이동 입력 큐(재조정용), 틱당 ≤10 소비 |
 | `weapons: Map<id, Map<weaponId, WeaponRuntime>>` | 무기별 ammo/nextFireAt/reloadEndsAt/reloading |
 | `prevFiring: Map<id,boolean>` | 반자동 엣지(클릭당 1발) 판정 |
+| `jumpVel: Map<id,number>` · `jumpReadyAt: Map<id,number>` | 점프 수직 속도 · 착지 후 재점프 가능 시각(쿨다운) |
 | `respawnAt: Map<id,number>` · `pendingClass: Map<id,string>` | 리스폰 타이머 · 다음 리스폰에 적용할 클래스 |
 | `packRespawnAt: number[]` | 헬스팩별 재생성 시각 |
 
@@ -111,24 +113,31 @@ applyFiring → (자동:firing / 반자동:firing&&!prevFiring) && !reloading &&
 
 ---
 
-## 5. Phaser Scene 구조 (`apps/web/game`)
+## 5. 클라이언트 구조 (`apps/web`) — React가 연결 소유, Phaser는 렌더만
+
+**관심사 분리:** 메뉴·HUD·오버레이는 **React DOM**, 게임 월드/이펙트는 **Phaser**, Colyseus 연결은 **React `NetProvider`**가 소유한다.
 
 ```
-app/play/page.tsx → dynamic(PhaserGame, { ssr:false })
-PhaserGame.tsx    → 브라우저에서 Phaser 지연 로드 · arcade physics · new Phaser.Game({ scene:[ArenaScene] })
-                    언마운트 시 game.destroy(true)
-ArenaScene.ts     → (현재 클라 로직 전부 집중: 접속 + 렌더 + 입력 + 예측 + HUD)
+app/page.tsx (진입점 /)  → NetProvider → Stage
+                            status≠connected → <MainMenu/>      (풀스크린 메뉴)
+                            status=connected  → <PhaserGame/>   (풀스크린 게임)
+                          (app/play/page.tsx 는 `/` 재export — 라우팅 호환)
+NetProvider.tsx          → Colyseus Client/Room 소유: connect({name,classId,roomId?})
+                            (roomId→joinById / 아니면 joinOrCreate), disconnect, getRooms(GET /matchmake/arena)
+PhaserGame.tsx           → fixed inset:0, Phaser Scale.RESIZE(뷰포트 채움·자동 리사이즈)
+                            room 주입(scene init) + <Hud>/<DeathOverlay> 오버레이 마운트
+ArenaScene.ts            → 주입된 room으로 렌더 + 입력 + 예측/재조정 + 인월드 이펙트(연결 없음)
 ```
 
-**ArenaScene 책임 (단일 씬):**
-- `create()`: 월드(그리드/경계), 맵 벽/헬스팩 마커, graphics(트레이서/조준), 키 바인딩, HUD 텍스트, **연결(`connect`)**.
-- `connect()`: `new Client(NEXT_PUBLIC_GAME_SERVER_URL)` → `joinOrCreate("arena",{name,classId})`, `onMessage(shot/kill)` 등록.
-- `update(dt)`: 트레이서/킬피드 → `room.state` 폴링 → 뷰 동기화(생성/제거/색/이름) → 헬스팩 → **로컬 입력+예측 재조정** → 렌더(본인=predicted, 원격=보간) → 조준선 → HUD/스코어보드/매치/배너.
-- **뷰 관리:** `views: Map<sessionId, {rect,muzzle,label,...}>` — 상태와 표시 객체 매핑.
+**ArenaScene 책임:**
+- `init(room,sessionId)`: NetProvider가 주입한 라이브 room 수신(자체 연결 없음).
+- `create()`: 월드(그리드/경계), 맵 벽/헬스팩 마커, graphics(트레이서/조준), 키 바인딩, `onMessage(shot)`(VFX), 데미지 플래시.
+- `update(dt)`: 트레이서 → `room.state` 폴링 → 뷰 동기화(생성/제거/색/이름) → 헬스팩 → **로컬 입력+예측 재조정(이동·점프)** → 렌더(본인=predicted, 원격=보간, jumpY 수직 오프셋+그림자) → 조준선. `getSetting`으로 셰이크/이펙트 토글.
+- **뷰 관리:** `views: Map<sessionId, {rect,shadow,muzzle,label,...}>`.
 
-> **현황/주의:** 씬이 하나뿐이고 **Colyseus 연결을 씬이 소유**한다. UI 개선(메뉴/오버레이) 착수 시
-> [06-ui-ux-plan](./docs/design/06-ui-ux-plan.md)의 **U1: 연결을 React(NetProvider)로 이전 + ArenaScene을 `room` 주입형으로 리팩터**가 선행 권장.
-> 향후 분리 예: `BootScene`(프리로드) / `ArenaScene`(게임) / DOM 오버레이(메뉴·사망·라운드종료).
+**React DOM 레이어 (`components/`):** `MainMenu`(닉네임+클래스+ENTER GAME) · `ServerBrowser`(룸 리스트/퀵매치) · `SettingsModal`(설정/조작법) · `Hud`(체력/탄약/타이머/리더보드/킬피드)+`Minimap` · `DeathOverlay`(킬러·클래스 스왑·리스폰 카운트). HUD/오버레이는 `room.state`를 폴링/구독해 렌더하며 `pointer-events:none`으로 조준/사격 입력을 캔버스로 통과시킨다. 라운드 종료 스코어보드·전체 스코어보드(Shift)는 Hud가 처리.
+
+> **풀스크린:** `layout.tsx`가 `html/body height:100% + overflow:hidden` + 모바일 viewport 메타, PhaserGame이 `Scale.RESIZE`로 뷰포트 전체를 채우고 창 리사이즈에 자동 대응.
 
 ---
 
@@ -136,12 +145,12 @@ ArenaScene.ts     → (현재 클라 로직 전부 집중: 접속 + 렌더 + 입
 
 > **전송 계층:** raw socket.io가 아니라 **Colyseus(WebSocket) + Schema**. 지속 상태는 **Schema 델타 자동 동기화**(30Hz 시뮬 / 50ms 패치), 1회성 신호만 **메시지(이벤트)**. 타입 정의: [`packages/shared/src/protocol.ts`](./packages/shared/src/protocol.ts).
 
-**입장:** `client.joinOrCreate("arena", JoinOptions { name?, classId? })`
+**입장:** `joinOrCreate("arena", JoinOptions { name?, classId? })` 또는 `joinById(roomId, …)`. 룸 목록은 GET `/matchmake/arena`(NetProvider `getRooms`). 연결은 React `NetProvider`가 소유.
 
 **Client → Server (room.send):**
 | 이벤트 | 페이로드 | 처리 |
 |--------|----------|------|
-| `input` | `InputMessage { seq, dtMs, moveX(-1..1), moveY(-1..1), aim(rad), firing }` | 이동 큐 적재 + 최신 조준/발사 갱신 (매 프레임) |
+| `input` | `InputMessage { seq, dtMs, moveX(-1..1), moveY(-1..1), aim(rad), firing, jump }` | 이동 큐 적재 + 최신 조준/발사/점프 갱신 (매 프레임) |
 | `reload` | — | 활성 무기 재장전 큐잉 |
 | `switchWeapon` | — | 주↔보조 전환(보조 보유 클래스) |
 | `selectClass` | `SelectClassMessage { classId }` | **다음 리스폰에 적용**(pendingClass) |
@@ -155,3 +164,15 @@ ArenaScene.ts     → (현재 클라 로직 전부 집중: 접속 + 렌더 + 입
 **상태 동기화(메시지 아님):** `room.state` = `GameState{ players, match, healthPacks }`. 클라는 `update()`에서 폴링하여 뷰/HUD/스코어보드를 갱신. `Player.lastSeq`로 클라 예측 재조정.
 
 **레이트 상수:** `NET.TICKRATE=30`, `NET.PATCHRATE_MS=50`, `MAX_INPUT_DT_MS=50`(이동 dt 클램프, 스피드핵 방지).
+
+---
+
+## 7. 배포 토폴로지 (설정 완료, 현재 `master`)
+
+```
+브라우저 ──https──▶ Vercel (apps/web, Next.js 정적/SSR)   # NEXT_PUBLIC_GAME_SERVER_URL=wss://…
+        ──wss───▶ Render (game-server, Docker/Node20)    # 단일 포트: 매치메이킹 + /health
+```
+- **server**: `Dockerfile`(서버 서브그래프만, `tsx`로 TS 실행) · `render.yaml`(Blueprint, `healthCheckPath:/health`) · `/health`(200 `{status:"ok"}`+CORS) — Colyseus `attachMatchMakingRoutes`가 기존 핸들러를 보존하므로 `/matchmake/*`와 공존. CORS는 매치메이킹은 Colyseus가 자동, WebSocket은 비제약.
+- **web**: Vercel Root `apps/web`. `NEXT_PUBLIC_*`는 빌드타임 인라인(서버 URL 변경 시 재배포).
+- 상세/체크리스트: [`docs/DEPLOY.md`](./docs/DEPLOY.md). **실제 공개 호스팅은 미실시**(설정만 준비). 배포 파일은 `master`에 있으며 `dev`에는 아직 미반영.

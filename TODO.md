@@ -1,28 +1,28 @@
 # TODO
 
-> 상태는 실제 구현과 대조해 표기. 일부 "Next" 항목은 **코어 로직은 구현됨 / 진입 UI 미구현**으로 구분.
-> 상세: [PROJECT_STATE.md](./PROJECT_STATE.md) · [docs/design/06-ui-ux-plan.md](./docs/design/06-ui-ux-plan.md)
+> 실제 구현과 대조해 표기. 상세: [PROJECT_STATE.md](./PROJECT_STATE.md) · [docs/design/06-ui-ux-plan.md](./docs/design/06-ui-ux-plan.md)
 
-## MVP
+## 완료 (Done)
 
-- [x] 이동 (WASD, 서버 권위 + 클라 예측/재조정)
-- [x] 총알 (서버 권위 히트스캔 + 벽/LOS)
-- [x] HP (데미지/사망/리스폰, 헬스팩 회복)
+**코어:** 이동(서버 권위 + 예측/재조정) · 히트스캔 사격(벽/LOS) · HP/사망/리스폰 · 헬스팩 ·
+클래스 3종/무기 4종 · FFA 점수·라운드 루프 · 점프(Space, 홀드 시 자동 재점프)
 
-## Next
+**UX/UI:** 진입점 `/` 풀스크린 메인 메뉴(닉네임+클래스 카드) · 서버 브라우저(퀵매치/룸 리스트) ·
+React DOM HUD(체력/탄약/타이머/리더보드/킬피드) · 미니맵 · 사망 오버레이(킬러·클래스 스왑·카운트) ·
+라운드 종료 오버레이 · 전체 스코어보드(Shift) · 설정/조작법 · 연결을 React(`NetProvider`)로 이전
 
-- [ ] 클래스 선택 — *UI 미구현. 코어는 됨: 인게임 키 `1/2/3` + 리스폰 시 적용. → 메뉴 카드/선택 화면 필요(UI-U2)*
-- [ ] 리스폰 — *UI 미구현. 코어는 됨: 서버 2초 후 안전 스폰. → 사망 오버레이(킬러·클래스 스왑·카운트) 필요(UI-U4)*
-- [x] 킬로그 — 킬피드 동작 (서버 `kill` 이벤트 → 클라 킬피드 표시)
-- [ ] 미니맵 — 미구현
+**배포 설정(`master`):** `/health`+CORS · `Dockerfile`/`.dockerignore` · `render.yaml` · `.env.example` · `docs/DEPLOY.md`
 
-## Later (로드맵 요약 — PROJECT_STATE §9)
+## 진행 중 / 다음 (P0)
 
-- [ ] 즉시 플레이 UI: 메인 메뉴(닉네임+PLAY), 서버 브라우저, 라운드 종료 오버레이 (UI-U1~U5)
-- [ ] 배포: game-server(헬스체크/CORS/Docker, Fly·Render) + web(Vercel)
-- [ ] 콘텐츠: 추가 클래스/무기, 추가 모드(TDM 등)
-- [ ] 폴리시: 사운드 SFX, 킬스트릭 텍스트, 설정/키 리매핑
-- [ ] 테스트: 스모크 테스트를 정식 러너(vitest 등)로 영속화
+- [ ] **공개 호스팅** — 배포 설정을 `dev`로 동기화(master→dev) 후 실제 배포: game-server(Render/Docker), web(Vercel). 가이드 `docs/DEPLOY.md`.
 
-### 범위 외 (구현 안 함)
+## 예정 (Planned)
+
+- [ ] **콘텐츠** — 추가 클래스/무기(Detective 등), 추가 모드(TDM/Hardpoint)
+- [ ] **폴리시** — 사운드 SFX, 킬스트릭 텍스트, 키 리매핑, PING/FPS 표시, 채팅
+- [ ] **테스트** — 스모크 테스트를 정식 러너(vitest 등)로 영속화
+
+## 범위 외 (구현 안 함)
+
 계정/로그인 · 클랜 · 상점/코스메틱 · 모드(텍스처) 시스템 · 사설 서버
