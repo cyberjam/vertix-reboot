@@ -17,6 +17,20 @@ export type NetStatus = "idle" | "connecting" | "connected" | "error";
 export interface JoinOptions {
   name: string;
   classId: string;
+  /** Join a specific room by id. If omitted, joinOrCreate is used. */
+  roomId?: string;
+}
+
+export interface RoomMeta {
+  mode: string;
+  map: string;
+}
+
+export interface AvailableRoom {
+  roomId: string;
+  clients: number;
+  maxClients: number;
+  metadata: RoomMeta | null;
 }
 
 interface NetValue {
@@ -27,6 +41,7 @@ interface NetValue {
   serverUrl: string;
   connect(opts: JoinOptions): Promise<void>;
   disconnect(): void;
+  getRooms(): Promise<AvailableRoom[]>;
 }
 
 const NetContext = createContext<NetValue | null>(null);
@@ -43,13 +58,19 @@ export function NetProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<NetStatus>("idle");
   const [error, setError] = useState<string | null>(null);
 
-  const connect = useCallback(async ({ name, classId }: JoinOptions) => {
+  const getClient = useCallback(() => {
+    if (!clientRef.current) clientRef.current = new Client(SERVER_URL);
+    return clientRef.current;
+  }, []);
+
+  const connect = useCallback(async ({ name, classId, roomId }: JoinOptions) => {
     setStatus("connecting");
     setError(null);
     try {
-      const client = clientRef.current ?? new Client(SERVER_URL);
-      clientRef.current = client;
-      const joined = await client.joinOrCreate("arena", { name, classId });
+      const client = getClient();
+      const joined = roomId
+        ? await client.joinById(roomId, { name, classId })
+        : await client.joinOrCreate("arena", { name, classId });
       joined.onLeave(() => {
         setRoom(null);
         setSessionId("");
@@ -65,7 +86,7 @@ export function NetProvider({ children }: { children: ReactNode }) {
       );
       setStatus("error");
     }
-  }, []);
+  }, [getClient]);
 
   const disconnect = useCallback(() => {
     void room?.leave();
@@ -74,9 +95,19 @@ export function NetProvider({ children }: { children: ReactNode }) {
     setStatus("idle");
   }, [room]);
 
+  const getRooms = useCallback(async (): Promise<AvailableRoom[]> => {
+    try {
+      // Colyseus 0.16 exposes GET /matchmake/:roomName for room discovery.
+      const res = await getClient().http.get<AvailableRoom[]>("/matchmake/arena");
+      return Array.isArray(res.data) ? res.data : [];
+    } catch {
+      return [];
+    }
+  }, [getClient]);
+
   return (
     <NetContext.Provider
-      value={{ status, room, sessionId, error, serverUrl: SERVER_URL, connect, disconnect }}
+      value={{ status, room, sessionId, error, serverUrl: SERVER_URL, connect, disconnect, getRooms }}
     >
       {children}
     </NetContext.Provider>

@@ -1,25 +1,31 @@
-import Link from "next/link";
-import { SHARED_VERSION } from "@vertix/shared";
+"use client";
 
+import dynamic from "next/dynamic";
+import { NetProvider, useNet } from "@/game/net/NetProvider";
+import MainMenu from "@/components/MainMenu";
+
+// Phaser touches `window`, so the game canvas must be client-only (no SSR).
+const PhaserGame = dynamic(() => import("@/game/PhaserGame"), {
+  ssr: false,
+  loading: () => <p style={{ padding: 24 }}>Loading game…</p>,
+});
+
+function Stage() {
+  const { status, room, sessionId } = useNet();
+
+  if (status === "connected" && room) {
+    return <PhaserGame room={room} sessionId={sessionId} />;
+  }
+
+  return <MainMenu />;
+}
+
+// Primary entry point: land straight on the nickname / Enter Game screen,
+// then mount the game once connected.
 export default function HomePage() {
   return (
-    <main
-      style={{
-        display: "flex",
-        flexDirection: "column",
-        alignItems: "center",
-        justifyContent: "center",
-        minHeight: "100vh",
-        gap: 16,
-      }}
-    >
-      <h1 style={{ margin: 0 }}>Vertix Reboot</h1>
-      <p style={{ opacity: 0.7 }}>
-        Top-down arena shooter — scaffolding (shared v{SHARED_VERSION})
-      </p>
-      <Link href="/play" style={{ color: "#4ea1ff", fontSize: 20 }}>
-        ▶ Play
-      </Link>
-    </main>
+    <NetProvider>
+      <Stage />
+    </NetProvider>
   );
 }

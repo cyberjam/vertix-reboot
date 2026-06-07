@@ -4,9 +4,7 @@ import { useEffect, useRef } from "react";
 import type { Game } from "phaser";
 import type { Room } from "colyseus.js";
 import Hud from "@/components/Hud";
-
-const GAME_WIDTH = 960;
-const GAME_HEIGHT = 540;
+import DeathOverlay from "@/components/DeathOverlay";
 
 interface PhaserGameProps {
   room: Room;
@@ -33,10 +31,14 @@ export default function PhaserGame({ room, sessionId }: PhaserGameProps) {
 
       const game = new Phaser.Game({
         type: Phaser.AUTO,
-        width: GAME_WIDTH,
-        height: GAME_HEIGHT,
         parent: containerRef.current,
         backgroundColor: "#0b0e14",
+        // Fill the parent (full viewport) and auto-resize with the window.
+        scale: {
+          mode: Phaser.Scale.RESIZE,
+          width: "100%",
+          height: "100%",
+        },
         physics: {
           default: "arcade",
           arcade: { debug: false },
@@ -55,16 +57,10 @@ export default function PhaserGame({ room, sessionId }: PhaserGameProps) {
   }, [room, sessionId]);
 
   return (
-    <div
-      style={{
-        position: "relative",
-        width: GAME_WIDTH,
-        height: GAME_HEIGHT,
-        border: "1px solid #1c2330",
-      }}
-    >
-      <div ref={containerRef} style={{ width: GAME_WIDTH, height: GAME_HEIGHT }} />
+    <div style={{ position: "fixed", inset: 0, overflow: "hidden" }}>
+      <div ref={containerRef} style={{ width: "100%", height: "100%" }} />
       <Hud room={room} sessionId={sessionId} />
+      <DeathOverlay room={room} sessionId={sessionId} />
     </div>
   );
 }

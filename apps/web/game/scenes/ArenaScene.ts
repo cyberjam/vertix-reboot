@@ -1,5 +1,6 @@
 import Phaser from "phaser";
 import { type Room } from "colyseus.js";
+import { getSetting } from "@/lib/settings";
 import {
   WORLD,
   PLAYER,
@@ -231,18 +232,20 @@ export class ArenaScene extends Phaser.Scene {
     // "shot" drives the tracer/muzzle/hitmarker VFX (kept in Phaser). The kill
     // feed is rendered by the React HUD, which subscribes to "kill" itself.
     room.onMessage("shot", (msg: ShotMessage) => {
-      this.tracers.push({
-        sx: msg.sx,
-        sy: msg.sy,
-        ex: msg.ex,
-        ey: msg.ey,
-        hit: msg.hit,
-        until: this.time.now + TRACER_MS,
-      });
-      this.spawnMuzzle(msg.sx, msg.sy);
+      if (getSetting("effects")) {
+        this.tracers.push({
+          sx: msg.sx,
+          sy: msg.sy,
+          ex: msg.ex,
+          ey: msg.ey,
+          hit: msg.hit,
+          until: this.time.now + TRACER_MS,
+        });
+        this.spawnMuzzle(msg.sx, msg.sy);
+      }
       if (msg.by === this.mySessionId && msg.hit) {
-        this.showHitmarker();
-        this.cameras.main.shake(60, 0.004);
+        if (getSetting("effects")) this.showHitmarker();
+        if (getSetting("shake")) this.cameras.main.shake(60, 0.004);
       }
     });
   }
@@ -430,10 +433,11 @@ export class ArenaScene extends Phaser.Scene {
     }
   }
 
-  /** Local prediction of the jump arc (matches the server's stepJump). */
+  /** Local prediction of the jump arc (matches the server's applyJump/stepJump). */
   private predictJump(deltaMs: number): void {
+    // Held key auto-hops again once grounded and off cooldown (matches server).
     if (
-      Phaser.Input.Keyboard.JustDown(this.keySpace) &&
+      this.keySpace.isDown &&
       this.localJumpY <= 0 &&
       this.time.now >= this.localJumpReadyAt
     ) {
@@ -549,7 +553,7 @@ export class ArenaScene extends Phaser.Scene {
       this.tweens.add({ targets: this.damageFlash, alpha: 0, duration: 250 });
     }
     // Camera shake on death.
-    if (this.prevMyAlive && !me.alive) {
+    if (this.prevMyAlive && !me.alive && getSetting("shake")) {
       this.cameras.main.shake(250, 0.012);
     }
     this.prevMyHp = me.hp;
