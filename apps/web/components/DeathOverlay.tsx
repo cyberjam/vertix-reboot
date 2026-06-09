@@ -6,6 +6,7 @@ import { CLASS_IDS, RESPAWN_MS, getClass, getWeapon, type KillMessage } from "@v
 import styles from "./DeathOverlay.module.css";
 
 const POLL_MS = 80;
+const SUMMARY_PHASE_MS = 2000; // killer info only for first 2s, then show class picker
 
 /**
  * How long after death the class picker stays hidden. During this first phase
@@ -90,7 +91,7 @@ export default function DeathOverlay({ room, sessionId }: Props) {
     return () => cancelAnimationFrame(raf);
   }, [room, sessionId]);
 
-  // Countdown timer while dead
+  // Countdown timer + phase transition while dead
   useEffect(() => {
     if (!dead) return;
     const id = window.setInterval(() => {
