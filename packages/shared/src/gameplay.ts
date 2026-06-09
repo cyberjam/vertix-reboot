@@ -94,7 +94,7 @@ const SNIPER_DEF: WeaponDef = {
   fireRateMs: 1100, // slow single fire; missing is heavily punished
   reloadMs: 2200,
   rangePx: 1700, // dominates long sightlines (near cross-map)
-  auto: false, // semi-auto, fully accurate
+  auto: true, // hold-to-fire at 1100ms cadence; fireRateMs unchanged
 };
 
 const MACHINE_PISTOL_DEF: WeaponDef = {
@@ -116,7 +116,7 @@ const SHOTGUN_DEF: WeaponDef = {
   fireRateMs: 800, // pump action
   reloadMs: 1900,
   rangePx: 480, // short; pellets spread out beyond this
-  auto: false,
+  auto: true, // hold-to-fire at 800ms cadence; fireRateMs unchanged
   pellets: 4, // confirmed: Vince fires a spread of 4 pellets
   spreadDeg: 16,
 };
