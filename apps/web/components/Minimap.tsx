@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from "react";
 import type { Room } from "colyseus.js";
-import { WORLD, ARENA01, getClass } from "@vertix/shared";
+import { getClass, getMap } from "@vertix/shared";
 
 const SIZE = 150; // minimap canvas size (px)
 
@@ -21,9 +21,9 @@ interface PackLike {
 const hex = (n: number) => "#" + n.toString(16).padStart(6, "0");
 
 /**
- * Live minimap (T4) — reproduces Vertix's `#mapc`. Draws the static ARENA01
- * walls plus the live player/health-pack positions from room state onto a
- * canvas each frame. Read-only overlay (no interaction).
+ * Live minimap (T4) — reproduces Vertix's `#mapc`. Draws the active map's
+ * walls (resolved from room state) plus the live player/health-pack positions
+ * onto a canvas each frame. Read-only overlay (no interaction).
  */
 export default function Minimap({ room, sessionId }: { room: Room; sessionId: string }) {
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -34,12 +34,22 @@ export default function Minimap({ room, sessionId }: { room: Room; sessionId: st
     const ctx = canvas.getContext("2d");
     if (!ctx) return;
 
-    const sx = SIZE / WORLD.WIDTH;
-    const sy = SIZE / WORLD.HEIGHT;
     let raf = 0;
 
     const draw = () => {
       raf = requestAnimationFrame(draw);
+
+      const state = room.state as {
+        match: { map: string };
+        players: { forEach(cb: (p: PlayerLike, id: string) => void): void };
+        healthPacks: { forEach(cb: (p: PackLike) => void): void };
+      };
+
+      // Resolve the active map from state so the minimap matches the arena the
+      // server loaded; scale to its dimensions.
+      const map = getMap(state.match?.map);
+      const sx = SIZE / map.width;
+      const sy = SIZE / map.height;
 
       // Background + border.
       ctx.clearRect(0, 0, SIZE, SIZE);
@@ -48,14 +58,9 @@ export default function Minimap({ room, sessionId }: { room: Room; sessionId: st
 
       // Static walls.
       ctx.fillStyle = "#39435c";
-      for (const w of ARENA01.walls) {
+      for (const w of map.walls) {
         ctx.fillRect(w.x * sx, w.y * sy, w.w * sx, w.h * sy);
       }
-
-      const state = room.state as {
-        players: { forEach(cb: (p: PlayerLike, id: string) => void): void };
-        healthPacks: { forEach(cb: (p: PackLike) => void): void };
-      };
 
       // Active health packs.
       state.healthPacks.forEach((pack) => {
