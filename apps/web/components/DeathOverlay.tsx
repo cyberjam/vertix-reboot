@@ -6,6 +6,7 @@ import { CLASS_IDS, RESPAWN_MS, getClass, getWeapon, type KillMessage } from "@v
 import styles from "./DeathOverlay.module.css";
 
 const POLL_MS = 80;
+const SUMMARY_PHASE_MS = 2000; // killer info only for first 2s, then show class picker
 
 // Map Phaser numeric color → CSS hex string
 const CLASS_COLORS: Record<string, string> = {
@@ -31,6 +32,7 @@ export default function DeathOverlay({ room, sessionId }: Props) {
   const [killerClassId, setKillerClassId] = useState("");
   const [selectedClass, setSelectedClass] = useState("triggerman");
   const [countdown, setCountdown] = useState(0);
+  const [showClassSelect, setShowClassSelect] = useState(false);
 
   const diedAtRef = useRef<number | null>(null);
   const prevAliveRef = useRef(true);
@@ -65,11 +67,13 @@ export default function DeathOverlay({ room, sessionId }: Props) {
         // Just died
         diedAtRef.current = Date.now();
         setSelectedClass(me.classId ?? "triggerman");
+        setShowClassSelect(false);
         setDead(true);
       } else if (!wasAlive && isAlive) {
         // Respawned
         diedAtRef.current = null;
         setDead(false);
+        setShowClassSelect(false);
         setKillerName("");
         setKillerClassId("");
       }
@@ -79,13 +83,14 @@ export default function DeathOverlay({ room, sessionId }: Props) {
     return () => cancelAnimationFrame(raf);
   }, [room, sessionId]);
 
-  // Countdown timer while dead
+  // Countdown timer + phase transition while dead
   useEffect(() => {
     if (!dead) return;
     const id = window.setInterval(() => {
       const elapsed = diedAtRef.current ? Date.now() - diedAtRef.current : RESPAWN_MS;
       const remaining = Math.max(0, Math.ceil((RESPAWN_MS - elapsed) / 1000));
       setCountdown(remaining);
+      setShowClassSelect(elapsed >= SUMMARY_PHASE_MS);
     }, 200);
     return () => clearInterval(id);
   }, [dead]);
@@ -137,32 +142,36 @@ export default function DeathOverlay({ room, sessionId }: Props) {
           </div>
         )}
 
-        <div className={styles.pickerLabel}>SELECT CLASS FOR NEXT RESPAWN</div>
-        <div className={styles.cards}>
-          {CLASS_IDS.map((id) => {
-            const cls = getClass(id);
-            const primary = getWeapon(cls.primary);
-            const secondary = cls.secondary ? getWeapon(cls.secondary) : null;
-            const active = selectedClass === id;
-            const color = CLASS_COLORS[id] ?? "#5151d9";
-            return (
-              <button
-                key={id}
-                className={`${styles.card} ${active ? styles.cardActive : ""}`}
-                style={{ borderColor: active ? color : undefined, "--cls-color": color } as React.CSSProperties}
-                onClick={() => handleSelectClass(id)}
-              >
-                <div className={styles.cardDot} style={{ background: color }} />
-                <div className={styles.cardName}>{cls.name}</div>
-                <div className={styles.cardStat}>HP {cls.maxHp}</div>
-                <div className={styles.cardWeapon}>{primary.name}</div>
-                {secondary && (
-                  <div className={styles.cardWeapon}>{secondary.name}</div>
-                )}
-              </button>
-            );
-          })}
-        </div>
+        {showClassSelect && (
+          <>
+            <div className={styles.pickerLabel}>SELECT CLASS FOR NEXT RESPAWN</div>
+            <div className={styles.cards}>
+              {CLASS_IDS.map((id) => {
+                const cls = getClass(id);
+                const primary = getWeapon(cls.primary);
+                const secondary = cls.secondary ? getWeapon(cls.secondary) : null;
+                const active = selectedClass === id;
+                const color = CLASS_COLORS[id] ?? "#5151d9";
+                return (
+                  <button
+                    key={id}
+                    className={`${styles.card} ${active ? styles.cardActive : ""}`}
+                    style={{ borderColor: active ? color : undefined, "--cls-color": color } as React.CSSProperties}
+                    onClick={() => handleSelectClass(id)}
+                  >
+                    <div className={styles.cardDot} style={{ background: color }} />
+                    <div className={styles.cardName}>{cls.name}</div>
+                    <div className={styles.cardStat}>HP {cls.maxHp}</div>
+                    <div className={styles.cardWeapon}>{primary.name}</div>
+                    {secondary && (
+                      <div className={styles.cardWeapon}>{secondary.name}</div>
+                    )}
+                  </button>
+                );
+              })}
+            </div>
+          </>
+        )}
 
         <div className={styles.countdown}>
           {countdown > 0 ? `Respawning in ${countdown}…` : "Respawning…"}
