@@ -8,6 +8,14 @@ import styles from "./DeathOverlay.module.css";
 const POLL_MS = 80;
 const SUMMARY_PHASE_MS = 2000; // killer info only for first 2s, then show class picker
 
+/**
+ * How long after death the class picker stays hidden. During this first phase
+ * only the elimination/killer info is shown; afterwards the class cards appear
+ * for the remainder of the (now ~6s) respawn timer. This delay is carved out of
+ * RESPAWN_MS, not added to it — total respawn time is unchanged from the timer.
+ */
+const RESPAWN_PICKER_DELAY_MS = 2000;
+
 // Map Phaser numeric color → CSS hex string
 const CLASS_COLORS: Record<string, string> = {
   triggerman: "#4ea1ff",
@@ -32,7 +40,7 @@ export default function DeathOverlay({ room, sessionId }: Props) {
   const [killerClassId, setKillerClassId] = useState("");
   const [selectedClass, setSelectedClass] = useState("triggerman");
   const [countdown, setCountdown] = useState(0);
-  const [showClassSelect, setShowClassSelect] = useState(false);
+  const [showPicker, setShowPicker] = useState(false);
 
   const diedAtRef = useRef<number | null>(null);
   const prevAliveRef = useRef(true);
@@ -67,13 +75,13 @@ export default function DeathOverlay({ room, sessionId }: Props) {
         // Just died
         diedAtRef.current = Date.now();
         setSelectedClass(me.classId ?? "triggerman");
-        setShowClassSelect(false);
+        setShowPicker(false);
         setDead(true);
       } else if (!wasAlive && isAlive) {
         // Respawned
         diedAtRef.current = null;
         setDead(false);
-        setShowClassSelect(false);
+        setShowPicker(false);
         setKillerName("");
         setKillerClassId("");
       }
@@ -90,7 +98,8 @@ export default function DeathOverlay({ room, sessionId }: Props) {
       const elapsed = diedAtRef.current ? Date.now() - diedAtRef.current : RESPAWN_MS;
       const remaining = Math.max(0, Math.ceil((RESPAWN_MS - elapsed) / 1000));
       setCountdown(remaining);
-      setShowClassSelect(elapsed >= SUMMARY_PHASE_MS);
+      // Reveal the class picker only after the initial elimination phase.
+      setShowPicker(elapsed >= RESPAWN_PICKER_DELAY_MS);
     }, 200);
     return () => clearInterval(id);
   }, [dead]);
@@ -142,34 +151,34 @@ export default function DeathOverlay({ room, sessionId }: Props) {
           </div>
         )}
 
-        {showClassSelect && (
+        {showPicker && (
           <>
-            <div className={styles.pickerLabel}>SELECT CLASS FOR NEXT RESPAWN</div>
-            <div className={styles.cards}>
-              {CLASS_IDS.map((id) => {
-                const cls = getClass(id);
-                const primary = getWeapon(cls.primary);
-                const secondary = cls.secondary ? getWeapon(cls.secondary) : null;
-                const active = selectedClass === id;
-                const color = CLASS_COLORS[id] ?? "#5151d9";
-                return (
-                  <button
-                    key={id}
-                    className={`${styles.card} ${active ? styles.cardActive : ""}`}
-                    style={{ borderColor: active ? color : undefined, "--cls-color": color } as React.CSSProperties}
-                    onClick={() => handleSelectClass(id)}
-                  >
-                    <div className={styles.cardDot} style={{ background: color }} />
-                    <div className={styles.cardName}>{cls.name}</div>
-                    <div className={styles.cardStat}>HP {cls.maxHp}</div>
-                    <div className={styles.cardWeapon}>{primary.name}</div>
-                    {secondary && (
-                      <div className={styles.cardWeapon}>{secondary.name}</div>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
+        <div className={styles.pickerLabel}>SELECT CLASS FOR NEXT RESPAWN</div>
+        <div className={styles.cards}>
+          {CLASS_IDS.map((id) => {
+            const cls = getClass(id);
+            const primary = getWeapon(cls.primary);
+            const secondary = cls.secondary ? getWeapon(cls.secondary) : null;
+            const active = selectedClass === id;
+            const color = CLASS_COLORS[id] ?? "#5151d9";
+            return (
+              <button
+                key={id}
+                className={`${styles.card} ${active ? styles.cardActive : ""}`}
+                style={{ borderColor: active ? color : undefined, "--cls-color": color } as React.CSSProperties}
+                onClick={() => handleSelectClass(id)}
+              >
+                <div className={styles.cardDot} style={{ background: color }} />
+                <div className={styles.cardName}>{cls.name}</div>
+                <div className={styles.cardStat}>HP {cls.maxHp}</div>
+                <div className={styles.cardWeapon}>{primary.name}</div>
+                {secondary && (
+                  <div className={styles.cardWeapon}>{secondary.name}</div>
+                )}
+              </button>
+            );
+          })}
+        </div>
           </>
         )}
 
