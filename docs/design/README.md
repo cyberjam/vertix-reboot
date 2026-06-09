@@ -18,6 +18,7 @@
 | 04 | [milestones.md](./04-milestones.md) | 개발 마일스톤 (M1~M16, 각 1~3시간·독립 테스트·순차 개발) |
 | 05 | [weapon-balance.md](./05-weapon-balance.md) | 무기 밸런스 캘리브레이션 (연사/재장전/사거리 확정, TTK 모델, 불변식) |
 | 06 | [ui-ux-plan.md](./06-ui-ux-plan.md) | UI/UX 개선안 (Vertix 흡수: 메인 메뉴 / 서버 브라우저 / 클래스 선택 / 리스폰 루프) |
+| 07 | [map-cow.md](./07-map-cow.md) | Cow Map — 첫 테마 맵 (치수 / 스폰 / 힐팩 / 교전 구역 / 가정). 원본 에셋·데이터 미사용 [설계 결정] |
 
 ## ⚠️ 자료 출처 및 신뢰도에 관한 중요한 고지
 

@@ -29,6 +29,8 @@ export class Player extends Schema {
 /** Replicated match (FFA round) state. */
 export class MatchState extends Schema {
   @type("string") mode = "ffa";
+  /** Active map id, so the client renders the same map the server loaded. */
+  @type("string") map = "cowmap";
   /** "playing" while the round is live, "ended" during the result screen. */
   @type("string") phase = "playing";
   @type("number") timeRemainingMs: number = FFA.DURATION_MS;

@@ -6,11 +6,12 @@ import {
   PLAYER,
   HEALTH_PACK,
   JUMP,
-  ARENA01,
   getClass,
+  getMap,
   stepMovement,
   stepJump,
   type InputMessage,
+  type RectWall,
   type ShotMessage,
 } from "@vertix/shared";
 
@@ -41,6 +42,7 @@ interface PlayerState {
 
 interface MatchStateView {
   mode: string;
+  map: string;
   phase: string;
   timeRemainingMs: number;
   targetScore: number;
@@ -128,6 +130,15 @@ export class ArenaScene extends Phaser.Scene {
   private tracers: Tracer[] = [];
   private healthPackMarkers: HealthPackMarker[] = [];
 
+  /**
+   * The active map's walls, resolved from `match.map` once the first state
+   * sync arrives. The world (walls) is built lazily because the server chooses
+   * the map; until then prediction has no walls to collide against (a 1-2 frame
+   * transient that the server reconciles). Empty = not built yet.
+   */
+  private activeWalls: RectWall[] = [];
+  private worldBuilt = false;
+
   private selectedClass = "triggerman";
   private localJumpY = 0;
   private localJumpVel = 0;
@@ -175,7 +186,8 @@ export class ArenaScene extends Phaser.Scene {
       .rectangle(WORLD.WIDTH / 2, WORLD.HEIGHT / 2, WORLD.WIDTH, WORLD.HEIGHT)
       .setStrokeStyle(2, 0x4ea1ff, 0.5);
 
-    this.buildMap();
+    // Walls are built lazily once the server tells us which map is active
+    // (see buildMapWalls, called from update on the first state sync).
 
     this.tracerGraphics = this.add.graphics().setDepth(1);
     this.aimGraphics = this.add.graphics().setDepth(1);
@@ -217,14 +229,16 @@ export class ArenaScene extends Phaser.Scene {
     this.registerRoomHandlers();
   }
 
-  private buildMap(): void {
-    // Walls (cover / line-of-sight blockers).
-    for (const wall of ARENA01.walls) {
+  /** Build the active map's walls (cover / line-of-sight blockers) once. */
+  private buildMapWalls(walls: RectWall[]): void {
+    for (const wall of walls) {
       this.add
         .rectangle(wall.x + wall.w / 2, wall.y + wall.h / 2, wall.w, wall.h, 0x39435c)
         .setStrokeStyle(2, 0x5a6b8c)
         .setDepth(0);
     }
+    this.activeWalls = walls;
+    this.worldBuilt = true;
     // Health pack markers are created lazily and driven by server state.
   }
 
@@ -281,6 +295,10 @@ export class ArenaScene extends Phaser.Scene {
     this.updateHealthPacks(state.healthPacks);
 
     const me = state.players.get(this.mySessionId);
+    // Build the world once we've synced (me present ⇒ match.map is correct).
+    if (!this.worldBuilt && me) {
+      this.buildMapWalls(getMap(state.match.map).walls);
+    }
     if (me) {
       this.handleLocalInput(me, deltaMs);
       this.trackLocalFeedback(me);
@@ -437,7 +455,7 @@ export class ArenaScene extends Phaser.Scene {
       let x = me.x;
       let y = me.y;
       for (const c of this.pending) {
-        const next = stepMovement(x, y, c.moveX, c.moveY, c.dtMs, ARENA01.walls);
+        const next = stepMovement(x, y, c.moveX, c.moveY, c.dtMs, this.activeWalls);
         x = next.x;
         y = next.y;
       }

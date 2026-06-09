@@ -61,7 +61,7 @@ export class ArenaRoom extends Room<GameState> {
   private readonly respawnAt = new Map<string, number>();
   private readonly pendingClass = new Map<string, string>();
   private readonly reloadQueued = new Set<string>();
-  private readonly map: MapDef = getMap(process.env.MAP_ID ?? "arena01");
+  private readonly map: MapDef = getMap(process.env.MAP_ID ?? "cowmap");
   private readonly packRespawnAt: number[] = [];
   private elapsed = 0;
   private matchEndAt = 0;
@@ -75,6 +75,7 @@ export class ArenaRoom extends Room<GameState> {
     this.maxClients = 8;
     this.setMetadata({ mode: "ffa", map: this.map.id });
     this.setState(new GameState());
+    this.state.match.map = this.map.id;
     this.state.match.targetScore = this.targetScore;
     this.state.match.timeRemainingMs = this.durationMs;
 
