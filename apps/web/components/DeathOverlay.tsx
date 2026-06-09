@@ -7,6 +7,14 @@ import styles from "./DeathOverlay.module.css";
 
 const POLL_MS = 80;
 
+/**
+ * How long after death the class picker stays hidden. During this first phase
+ * only the elimination/killer info is shown; afterwards the class cards appear
+ * for the remainder of the (now ~6s) respawn timer. This delay is carved out of
+ * RESPAWN_MS, not added to it — total respawn time is unchanged from the timer.
+ */
+const RESPAWN_PICKER_DELAY_MS = 2000;
+
 // Map Phaser numeric color → CSS hex string
 const CLASS_COLORS: Record<string, string> = {
   triggerman: "#4ea1ff",
@@ -31,6 +39,7 @@ export default function DeathOverlay({ room, sessionId }: Props) {
   const [killerClassId, setKillerClassId] = useState("");
   const [selectedClass, setSelectedClass] = useState("triggerman");
   const [countdown, setCountdown] = useState(0);
+  const [showPicker, setShowPicker] = useState(false);
 
   const diedAtRef = useRef<number | null>(null);
   const prevAliveRef = useRef(true);
@@ -65,11 +74,13 @@ export default function DeathOverlay({ room, sessionId }: Props) {
         // Just died
         diedAtRef.current = Date.now();
         setSelectedClass(me.classId ?? "triggerman");
+        setShowPicker(false);
         setDead(true);
       } else if (!wasAlive && isAlive) {
         // Respawned
         diedAtRef.current = null;
         setDead(false);
+        setShowPicker(false);
         setKillerName("");
         setKillerClassId("");
       }
@@ -86,6 +97,8 @@ export default function DeathOverlay({ room, sessionId }: Props) {
       const elapsed = diedAtRef.current ? Date.now() - diedAtRef.current : RESPAWN_MS;
       const remaining = Math.max(0, Math.ceil((RESPAWN_MS - elapsed) / 1000));
       setCountdown(remaining);
+      // Reveal the class picker only after the initial elimination phase.
+      setShowPicker(elapsed >= RESPAWN_PICKER_DELAY_MS);
     }, 200);
     return () => clearInterval(id);
   }, [dead]);
@@ -137,6 +150,8 @@ export default function DeathOverlay({ room, sessionId }: Props) {
           </div>
         )}
 
+        {showPicker && (
+          <>
         <div className={styles.pickerLabel}>SELECT CLASS FOR NEXT RESPAWN</div>
         <div className={styles.cards}>
           {CLASS_IDS.map((id) => {
@@ -163,6 +178,8 @@ export default function DeathOverlay({ room, sessionId }: Props) {
             );
           })}
         </div>
+          </>
+        )}
 
         <div className={styles.countdown}>
           {countdown > 0 ? `Respawning in ${countdown}…` : "Respawning…"}

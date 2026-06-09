@@ -18,8 +18,13 @@ export const PLAYER = {
   MAX_HP: 100, // default; per-class HP overrides this
 } as const;
 
-/** Delay before a dead player respawns (ms). */
-export const RESPAWN_MS = 2000;
+/**
+ * Delay before a dead player respawns (ms). The death overlay splits this
+ * window into a brief "you were eliminated" phase, then a class-selection
+ * phase (see DeathOverlay.RESPAWN_PICKER_DELAY_MS) — class selection is part
+ * of the respawn timer, not added on top of it.
+ */
+export const RESPAWN_MS = 6000;
 
 /**
  * Jump (vertical hop). Top-down so jumping is an orthogonal vertical axis
