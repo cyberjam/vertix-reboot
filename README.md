@@ -23,7 +23,7 @@ development.
 ## About
 
 It's a free-for-all top-down shooter that runs in the browser. You spawn into an
-arena with everyone else, fight, die, respawn a couple of seconds later, and
+arena with everyone else, fight, die, respawn a few seconds later, and
 keep going until someone hits the score limit or the round timer runs out. Then
 it resets and you go again.
 
@@ -39,7 +39,7 @@ platform, not a storefront — just the loop.
 
 ---
 
-## Features
+## Current Features
 
 Everything below is implemented and playable when you run it locally.
 
@@ -50,7 +50,7 @@ Everything below is implemented and playable when you run it locally.
   - **Hunter** — 50 HP, sniper + machine pistol. Fragile, deadly at range.
   - **Vince** — 100 HP, four-pellet shotgun. Close-range burst damage.
 - **Fast respawn.** Get killed, optionally swap to a different class, and you're
-  back in the fight about two seconds later.
+  back in the fight a few seconds later.
 - **Server-authoritative netcode.** The server owns all movement, shooting and
   hit detection — but your own movement is predicted locally and reconciled, so
   it stays responsive instead of rubber-banding.
@@ -85,13 +85,14 @@ Everything below is implemented and playable when you run it locally.
 
 ---
 
-## Roadmap
+## Planned Features
 
 ### In progress
 
 - **Public hosted build** — so you can play in the browser without running
-  anything yourself. Web on Vercel, the game server on Render, with a Docker
-  image, health check and CORS for production.
+  anything yourself. The production setup already lives in the repo (Docker
+  image, `render.yaml`, a `/health` check, CORS, and a deploy guide); what's
+  left is standing up the live instances — web on Vercel, game server on Render.
 
 ### Planned
 
@@ -100,10 +101,11 @@ Everything below is implemented and playable when you run it locally.
 - More modes (e.g. Team Deathmatch)
 - Key rebinding
 - Killstreak callouts ("Double Kill", etc.)
+- A persistent test runner (current checks are typecheck + build)
 - Optional accounts / persistent stats (still being decided)
 
-Implemented features live under [Features](#features); anything not listed there
-isn't built yet.
+Implemented features live under [Current Features](#current-features); anything
+not listed there isn't built yet.
 
 ---
 
@@ -116,7 +118,7 @@ isn't built yet.
 | **Realtime** | WebSocket state sync via Colyseus schema (30 Hz simulation, 50 ms patch rate). `colyseus.js` on the client with movement prediction + reconciliation. |
 | **Shared core** | `@vertix/shared` — class/weapon/map data and the deterministic movement simulation, imported by both client and server as a single source of truth. |
 | **Tooling** | pnpm workspaces + Turborepo monorepo. |
-| **Deployment** | Vercel (web) + Render (game server) — _planned, see Roadmap._ |
+| **Deployment** | Vercel (web) + Render (game server). Production config — `Dockerfile`, `render.yaml`, a `/health` check and CORS — is already in the repo; see [Deployment](#deployment). |
 
 ---
 
@@ -162,11 +164,16 @@ The design docs live in [`docs/design`](./docs/design/README.md).
 
 ## Deployment
 
-Hosted play isn't live yet — it's the current focus on the Roadmap. The intended
-setup is the web client on **Vercel** (root `apps/web`) and the authoritative
-game server on **Render** as a Docker service, with the client pointed at the
-server via `NEXT_PUBLIC_GAME_SERVER_URL` (use `wss://` from an HTTPS page).
-Production config (Dockerfile, health check, CORS) is landing alongside it.
+The production configuration already lives in the repo: a `Dockerfile`, a
+`render.yaml` blueprint, a `/health` endpoint, CORS handling, and a deploy
+checklist in [`docs/DEPLOY.md`](./docs/DEPLOY.md). The intended topology is the
+web client on **Vercel** (root `apps/web`) and the authoritative game server on
+**Render** as a Docker service, with the client pointed at the server via
+`NEXT_PUBLIC_GAME_SERVER_URL` (use `wss://` from an HTTPS page).
+
+A public hosted instance isn't live yet — standing one up is the current focus.
+You can also **self-host**: the server is a standard Node 20 Docker image, so
+anywhere that runs a container and exposes the WebSocket port will work.
 
 ---
 
